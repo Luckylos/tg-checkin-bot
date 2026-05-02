@@ -2,3 +2,5 @@ telethon==1.36.0
 APScheduler==3.10.4
 PyYAML==6.0.2
 pytz==2024.2
+pytest==8.3.4
+pytest-asyncio==0.24.0

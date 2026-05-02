@@ -100,6 +100,12 @@ docker-compose logs -f tg-checkin
 docker-compose run --rm tg-checkin python /app/app.py validate
 ```
 
+运行测试：
+
+```bash
+docker-compose run --rm --entrypoint pytest tg-checkin -q
+```
+
 ## 获取 chat_id
 
 把登录的用户号拉进目标群，并用该账号在目标群中发送控制命令：
@@ -144,6 +150,20 @@ docker-compose run --rm tg-checkin python /app/app.py validate
 
 # 也保留完整模式
 /add HyVPS -1003849837200 - /checkin@HyVPS_Bot
+```
+
+## 项目结构
+
+```text
+app.py                 # 兼容入口，转发到 tg_checkin.cli
+tg_checkin/cli.py      # CLI：run / validate / auth 禁用提示
+tg_checkin/app.py      # 运行时编排：Telegram client、APScheduler、配置热加载
+tg_checkin/config.py   # YAML 配置读写、环境变量和任务解析
+tg_checkin/control.py  # Telegram outgoing 控制命令解析与持久化修改
+tg_checkin/scheduler.py# cron 和错峰调度辅助
+tg_checkin/telegram.py # Telethon client/session 和 bot_command entity
+tg_checkin/models.py   # 数据模型与基础校验
+tests/                 # 行为回归测试
 ```
 
 ## 配置说明
