@@ -216,7 +216,6 @@ class CheckinApp:
             raise RuntimeError("missing required env: TG_SESSION_STRING")
         self.config_path = os.getenv("CONFIG_PATH", "/config/config.yml")
         self.reload_seconds = int(os.getenv("CONFIG_RELOAD_SECONDS", "60"))
-        self.admin_ids = env_int_set("TG_ADMIN_IDS")
         self.control_enabled = os.getenv("CONTROL_BOT_ENABLED", "true").lower() not in {"0", "false", "no"}
         self.client = create_client(session_string, api_id, api_hash)
         self.scheduler = AsyncIOScheduler()
@@ -232,9 +231,10 @@ class CheckinApp:
         me = await self.client.get_me()
         self.logger.info("authorized as %s", getattr(me, "username", None) or getattr(me, "id", "unknown"))
         if self.control_enabled:
-            self.client.add_event_handler(self.handle_control_message, events.NewMessage(incoming=True))
+            # This is an automation userbot: only the logged-in account's own
+            # outgoing commands are treated as configuration commands.
             self.client.add_event_handler(self.handle_control_message, events.NewMessage(outgoing=True))
-            self.logger.info("control bot enabled; admins=%s", sorted(self.admin_ids) if self.admin_ids else "self/outgoing only")
+            self.logger.info("control bot enabled for self outgoing commands")
 
     async def send_job(self, job: JobConfig) -> None:
         entities = command_entities(job.message, job.parse_bot_command)
@@ -291,21 +291,12 @@ class CheckinApp:
             except asyncio.TimeoutError:
                 pass
 
-    async def is_control_allowed(self, event: events.NewMessage.Event) -> bool:
-        if event.out:
-            return True
-        sender_id = event.sender_id
-        return bool(sender_id and sender_id in self.admin_ids)
-
     async def handle_control_message(self, event: events.NewMessage.Event) -> None:
         text = event.raw_text or ""
         cmd, args = parse_control_command(text)
         if cmd not in {"/help", "/id", "/list", "/add", "/del", "/enable", "/disable", "/set", "/test"}:
             return
         self.logger.info("control command received cmd=%s sender_id=%s chat_id=%s outgoing=%s", cmd, event.sender_id, event.chat_id, event.out)
-        if not await self.is_control_allowed(event):
-            await self.reply_control(event, "未授权。请在 TG_ADMIN_IDS 中加入你的 Telegram user id。")
-            return
         try:
             reply = await self.run_control_command(cmd, args, event)
         except Exception as exc:

@@ -33,7 +33,6 @@ TG_API_ID=你的_api_id
 TG_API_HASH=你的_api_hash
 TG_SESSION_STRING=你本地生成的_session_string
 CONTROL_BOT_ENABLED=true
-TG_ADMIN_IDS=你的Telegram用户ID
 ```
 
 ## 生成 TG_SESSION_STRING
@@ -97,48 +96,50 @@ docker-compose logs -f tg-checkin
 docker-compose run --rm tg-checkin python /app/app.py validate
 ```
 
-## 获取 chat_id / user_id
+## 获取 chat_id
 
-把登录的用户号拉进目标群，或在目标群中发送控制命令：
+把登录的用户号拉进目标群，并用该账号在目标群中发送控制命令：
 
 ```text
 /id
 ```
 
-回复会包含：
-
-```text
-chat_id=-1003849837200
-user_id=123456789
-```
-
-然后把 `chat_id` 写入任务配置。`TG_ADMIN_IDS` 填你的 `user_id`，多个用户用逗号分隔。
+回复会包含当前 `chat_id`。多数情况下你不需要手写它，因为群内 `/add` 会自动读取当前群名和 `chat_id`。
 
 ## Telegram 控制命令
 
-控制命令可以发给该登录账号，或由该账号自己发送。若是其他用户发送，必须在 `.env` 的 `TG_ADMIN_IDS` 白名单中。
+控制命令只监听登录账号自身发出的消息。推荐直接在目标群里用该账号发送命令，程序会自动读取当前群名和 `chat_id`。
 
 ```text
 /help
 /id
 /list
+/add <message...>
+/add <cron|-> <message...>
 /add <name> <chat_id> <cron|-> <message...>
-/del <name>
-/enable <name>
-/disable <name>
-/set <name> cron <expr|->
-/set <name> message <text>
-/set <name> chat_id <id>
-/test <name>
+/del [name]
+/enable [name]
+/disable [name]
+/set [name] cron <expr|->
+/set [name] message <text>
+/set [name] chat_id <id>
+/test [name]
 ```
 
 由于 Telegram 消息用空格分隔，控制命令里的 cron 建议用下划线代替空格，程序会自动还原。`-` 表示默认每天 `00:10`：
 
 ```text
+# 在目标群内自动添加当前群
+/add /checkin@HyVPS_Bot
+/add 0_10_9_*_*_* /checkin@HyVPS_Bot
+
+# 在当前群内修改/测试
+/set cron 0_10_9_*_*_*
+/set cron -
+/test
+
+# 也保留完整模式
 /add HyVPS -1003849837200 - /checkin@HyVPS_Bot
-/set HyVPS cron 0_10_9_*_*_*
-/set HyVPS cron -
-/test HyVPS
 ```
 
 ## 配置说明
