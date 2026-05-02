@@ -2,7 +2,10 @@ import asyncio
 import logging
 import os
 import re
+import base64
 import signal
+import sqlite3
+import struct
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,11 +16,13 @@ import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telethon import TelegramClient, events
-from telethon.sessions import StringSession
+from telethon.sessions import MemorySession, StringSession
+from telethon.crypto import AuthKey
 from telethon.tl.types import MessageEntityBotCommand
 
 BOT_COMMAND_RE = re.compile(r"^/[A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?")
 DEFAULT_CRON = "0 10 0 * * *"  # daily 00:10:00
+LEGACY_SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{80,}$")
 
 
 @dataclass(frozen=True)
@@ -153,6 +158,53 @@ def parse_control_command(text: str) -> Tuple[str, List[str]]:
     return cmd, parts[1:]
 
 
+def create_client(session_string: str, api_id: int, api_hash: str) -> TelegramClient:
+    """Create a Telethon client from Telethon or Pyrogram-style strings."""
+    session_string = session_string.strip()
+    if session_string.startswith("1"):
+        return TelegramClient(StringSession(session_string), api_id, api_hash)
+
+    if LEGACY_SESSION_RE.fullmatch(session_string):
+        raw = base64.urlsafe_b64decode(session_string + "=" * (-len(session_string) % 4))
+        if len(raw) == struct.calcsize(">BI?256sQ?"):
+            dc_id, embedded_api_id, test_mode, auth_key, user_id, is_bot = struct.unpack(">BI?256sQ?", raw)
+            if embedded_api_id != api_id:
+                raise ValueError("TG_SESSION_STRING api_id does not match TG_API_ID")
+            session = MemorySession()
+            session.set_dc(dc_id, dc_server_address(dc_id, test_mode), 443)
+            session.auth_key = AuthKey(auth_key)
+            return TelegramClient(session, api_id, api_hash)
+        if raw.startswith(b"SQLite format 3\x00") and hasattr(sqlite3.Connection, "deserialize"):
+            source = sqlite3.connect(":memory:")
+            source.deserialize(raw)
+            db_uri = "file:tgcheckin_session?mode=memory&cache=shared"
+            shared = sqlite3.connect(db_uri, uri=True)
+            source.backup(shared)
+            shared.close()
+            return TelegramClient(db_uri, api_id, api_hash)
+
+    return TelegramClient(StringSession(session_string), api_id, api_hash)
+
+
+def dc_server_address(dc_id: int, test_mode: bool = False) -> str:
+    prod = {
+        1: "149.154.175.53",
+        2: "149.154.167.51",
+        3: "149.154.175.100",
+        4: "149.154.167.91",
+        5: "91.108.56.130",
+    }
+    test = {
+        1: "149.154.175.10",
+        2: "149.154.167.40",
+        3: "149.154.175.117",
+    }
+    table = test if test_mode else prod
+    if dc_id not in table:
+        raise ValueError(f"unsupported Telegram dc_id: {dc_id}")
+    return table[dc_id]
+
+
 class CheckinApp:
     def __init__(self) -> None:
         api_id = env_int("TG_API_ID")
@@ -166,7 +218,7 @@ class CheckinApp:
         self.reload_seconds = int(os.getenv("CONFIG_RELOAD_SECONDS", "60"))
         self.admin_ids = env_int_set("TG_ADMIN_IDS")
         self.control_enabled = os.getenv("CONTROL_BOT_ENABLED", "true").lower() not in {"0", "false", "no"}
-        self.client = TelegramClient(StringSession(session_string), api_id, api_hash)
+        self.client = create_client(session_string, api_id, api_hash)
         self.scheduler = AsyncIOScheduler()
         self.logger = logging.getLogger("tg-checkin")
         self._config_mtime: Optional[float] = None
