@@ -233,6 +233,7 @@ class CheckinApp:
         self.logger.info("authorized as %s", getattr(me, "username", None) or getattr(me, "id", "unknown"))
         if self.control_enabled:
             self.client.add_event_handler(self.handle_control_message, events.NewMessage(incoming=True))
+            self.client.add_event_handler(self.handle_control_message, events.NewMessage(outgoing=True))
             self.logger.info("control bot enabled; admins=%s", sorted(self.admin_ids) if self.admin_ids else "self/outgoing only")
 
     async def send_job(self, job: JobConfig) -> None:
@@ -301,8 +302,9 @@ class CheckinApp:
         cmd, args = parse_control_command(text)
         if cmd not in {"/help", "/id", "/list", "/add", "/del", "/enable", "/disable", "/set", "/test"}:
             return
+        self.logger.info("control command received cmd=%s sender_id=%s chat_id=%s outgoing=%s", cmd, event.sender_id, event.chat_id, event.out)
         if not await self.is_control_allowed(event):
-            await event.reply("未授权。请在 TG_ADMIN_IDS 中加入你的 Telegram user id。")
+            await self.reply_control(event, "未授权。请在 TG_ADMIN_IDS 中加入你的 Telegram user id。")
             return
         try:
             reply = await self.run_control_command(cmd, args, event)
@@ -310,7 +312,13 @@ class CheckinApp:
             self.logger.exception("control command failed: %s", text)
             reply = f"失败：{exc}"
         if reply:
-            await event.reply(reply)
+            await self.reply_control(event, reply)
+
+    async def reply_control(self, event: events.NewMessage.Event, text: str) -> None:
+        if event.out:
+            await self.client.send_message(event.chat_id, text, reply_to=event.id)
+        else:
+            await event.reply(text)
 
     async def run_control_command(self, cmd: str, args: List[str], event: events.NewMessage.Event) -> str:
         if cmd == "/help":
