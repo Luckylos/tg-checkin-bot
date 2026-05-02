@@ -11,6 +11,7 @@ Docker 环境下基于 `TG_API_ID` / `TG_API_HASH` / `TG_SESSION_STRING` 的 Tel
 - 推荐使用 `-100...` 数字 `chat_id` 作为群组唯一标识，避免群组 username 改名导致失效。
 - `config/config.yml` 自由添加/删除群组、消息内容和 cron 时间。
 - `cron` 支持留空；留空默认每天 `00:10`。
+- 默认 cron 任务支持自动错峰发送，避免大量群组在同一秒集中签到。
 - 支持通过 Telegram 消息控制添加/删除/启用/禁用/修改/测试任务。
 - 自动重载配置文件。
 - 支持 5 字段或 6 字段 cron。
@@ -66,6 +67,9 @@ timezone: Asia/Shanghai
 default_delay_seconds: 3
 # 可选：单个任务 cron 留空时使用该默认值；不配置则内置为每天 00:10:00。
 default_cron: "0 10 0 * * *"
+# cron 留空/默认的任务会在触发后按任务稳定错峰 0~1800 秒发送。
+default_stagger_seconds: 1800
+default_stagger_mode: stable
 
 groups:
   - name: HyVPS
@@ -152,11 +156,15 @@ docker-compose run --rm tg-checkin python /app/app.py validate
   - 5 字段：`分 时 日 月 星期`
   - 6 字段：`秒 分 时 日 月 星期`
 - `run_on_start`：首次加载该任务后立即发送一次，建议仅测试时打开。
+- `default_stagger_seconds`：全局默认错峰窗口，默认 `1800` 秒。cron 留空/默认的任务会在触发后按任务分散到该窗口内发送。
+- `default_stagger_mode`：`stable` 为稳定错峰，同一任务每天偏移基本固定；`random` 为每次随机；`off` 为关闭。
+- `stagger_seconds` / `stagger_mode`：单任务覆盖全局错峰配置。显式写了非默认 cron 的任务默认不自动错峰，可按需为单任务设置。
 - `enabled`：设为 `false` 即可临时禁用。
 
 ## 注意事项
 
 - 这是用户号自动化，需遵守 Telegram 规则以及目标群组/机器人规则，避免高频发送、垃圾信息或绕过限制。
+- 群组数量较多时不要让所有任务同秒发送；保留默认错峰，或为不同任务设置不同 cron。
 - `TG_SESSION_STRING` 等同于登录凭据，请妥善保护。
-- `.env` 中的 `TG_API_HASH`、`TG_SESSION_STRING`、管理员 ID 都不要公开。
+- `.env` 中的 `TG_API_HASH`、`TG_SESSION_STRING` 都不要公开。
 - 若目标群组要求先加入群，需先用该 Telegram 账号加入目标群组。

@@ -3,10 +3,12 @@ import logging
 import os
 import re
 import base64
+import hashlib
 import signal
 import sqlite3
 import struct
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,6 +24,7 @@ from telethon.tl.types import MessageEntityBotCommand
 
 BOT_COMMAND_RE = re.compile(r"^/[A-Za-z0-9_]+(?:@[A-Za-z0-9_]+)?")
 DEFAULT_CRON = "0 10 0 * * *"  # daily 00:10:00
+DEFAULT_STAGGER_SECONDS = 1800  # spread default-cron jobs across 30 minutes
 LEGACY_SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{80,}$")
 
 
@@ -35,6 +38,8 @@ class JobConfig:
     cron: str
     delay_seconds: float
     run_on_start: bool
+    stagger_seconds: int
+    stagger_mode: str
 
 
 def setup_logging() -> None:
@@ -95,6 +100,12 @@ def normalize_chat_id(value: Any) -> int:
 def parse_jobs(config: Dict[str, Any]) -> List[JobConfig]:
     default_delay = float(config.get("default_delay_seconds", 3))
     default_cron = str(config.get("default_cron") or DEFAULT_CRON).strip() or DEFAULT_CRON
+    default_stagger = int(config.get("default_stagger_seconds", DEFAULT_STAGGER_SECONDS))
+    default_stagger_mode = str(config.get("default_stagger_mode") or "stable").strip().lower()
+    if default_stagger < 0:
+        raise ValueError("default_stagger_seconds must be >= 0")
+    if default_stagger_mode not in {"stable", "random", "off"}:
+        raise ValueError("default_stagger_mode must be stable, random, or off")
     jobs: List[JobConfig] = []
     for idx, item in enumerate(config.get("groups", []), start=1):
         if not isinstance(item, dict):
@@ -105,7 +116,17 @@ def parse_jobs(config: Dict[str, Any]) -> List[JobConfig]:
             raise ValueError(f"{name}: missing chat_id")
         if "message" not in item:
             raise ValueError(f"{name}: missing message")
-        cron = str(item.get("cron") or default_cron).strip()
+        raw_cron = item.get("cron")
+        cron = str(raw_cron or default_cron).strip()
+        uses_default_cron = raw_cron in (None, "") or cron == default_cron
+        stagger_seconds = int(item.get("stagger_seconds", default_stagger if uses_default_cron else 0))
+        stagger_mode = str(item.get("stagger_mode") or default_stagger_mode).strip().lower()
+        if stagger_seconds < 0:
+            raise ValueError(f"{name}: stagger_seconds must be >= 0")
+        if stagger_mode not in {"stable", "random", "off"}:
+            raise ValueError(f"{name}: stagger_mode must be stable, random, or off")
+        if stagger_mode == "off":
+            stagger_seconds = 0
         jobs.append(
             JobConfig(
                 name=name,
@@ -116,6 +137,8 @@ def parse_jobs(config: Dict[str, Any]) -> List[JobConfig]:
                 cron=cron,
                 delay_seconds=float(item.get("delay_seconds", default_delay)),
                 run_on_start=bool(item.get("run_on_start", False)),
+                stagger_seconds=stagger_seconds,
+                stagger_mode=stagger_mode,
             )
         )
     return jobs
@@ -148,6 +171,28 @@ def command_entities(message: str, enabled: bool) -> Optional[List[MessageEntity
     if not match:
         return None
     return [MessageEntityBotCommand(offset=0, length=len(match.group(0)))]
+
+
+def stable_stagger_offset(job: JobConfig) -> int:
+    if job.stagger_seconds <= 0:
+        return 0
+    if job.stagger_mode == "random":
+        return int(time.time_ns() % (job.stagger_seconds + 1))
+    seed = f"{job.name}:{job.chat_id}:{job.message}".encode("utf-8")
+    return int.from_bytes(hashlib.sha256(seed).digest()[:8], "big") % (job.stagger_seconds + 1)
+
+
+async def maybe_stagger_job(job: JobConfig) -> None:
+    offset = stable_stagger_offset(job)
+    if offset > 0:
+        logging.getLogger("tg-checkin").info(
+            "stagger job=%s chat_id=%s offset_seconds=%s mode=%s",
+            job.name,
+            job.chat_id,
+            offset,
+            job.stagger_mode,
+        )
+        await asyncio.sleep(offset)
 
 
 def parse_control_command(text: str) -> Tuple[str, List[str]]:
@@ -236,7 +281,9 @@ class CheckinApp:
             self.client.add_event_handler(self.handle_control_message, events.NewMessage(outgoing=True))
             self.logger.info("control bot enabled for self outgoing commands")
 
-    async def send_job(self, job: JobConfig) -> None:
+    async def send_job(self, job: JobConfig, *, apply_stagger: bool = False) -> None:
+        if apply_stagger:
+            await maybe_stagger_job(job)
         entities = command_entities(job.message, job.parse_bot_command)
         self.logger.info("sending job=%s chat_id=%s message=%r bot_command_entity=%s", job.name, job.chat_id, job.message, bool(entities))
         await self.client.send_message(job.chat_id, job.message, formatting_entities=entities)
@@ -263,13 +310,22 @@ class CheckinApp:
                 self.send_job,
                 trigger=trigger,
                 args=[job],
+                kwargs={"apply_stagger": True},
                 id=job.name,
                 replace_existing=True,
                 coalesce=True,
                 max_instances=1,
+                misfire_grace_time=max(60, job.stagger_seconds + 300),
             )
             enabled_count += 1
-            self.logger.info("scheduled job=%s cron=%s timezone=%s", job.name, job.cron, timezone)
+            self.logger.info(
+                "scheduled job=%s cron=%s timezone=%s stagger_seconds=%s stagger_mode=%s",
+                job.name,
+                job.cron,
+                timezone,
+                job.stagger_seconds,
+                job.stagger_mode,
+            )
             start_key = f"{job.name}:{job.cron}:{job.chat_id}:{job.message}"
             if job.run_on_start and start_key not in self._started_jobs:
                 self._started_jobs.add(start_key)
@@ -317,8 +373,8 @@ class CheckinApp:
                 "命令：\n"
                 "/id - 显示当前 chat_id 和 user_id\n"
                 "/list - 列出任务；群内使用时优先显示本群任务\n"
-                "/add <message...> - 在当前群自动用群名和 chat_id 添加，默认每天 00:10\n"
-                "/add <cron|-> <message...> - 当前群指定 cron，cron 用 _ 代替空格\n"
+                "/add <message...> - 在当前群自动用群名和 chat_id 添加，默认每天 00:10，且自动错峰发送\n"
+                "/add <cron|-> <message...> - 当前群指定 cron，cron 用 _ 代替空格；显式 cron 默认不自动错峰\n"
                 "/add <name> <chat_id> <cron|-> <message...> - 完整模式\n"
                 "/del [name]，群内省略 name 时删除本群任务\n"
                 "/enable [name] | /disable [name]\n"

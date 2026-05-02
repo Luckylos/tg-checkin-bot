@@ -6,6 +6,9 @@ timezone: Asia/Shanghai
 default_delay_seconds: 3
 # 单个任务 cron 留空时使用该默认值；不配置则内置为每天 00:10:00。
 default_cron: "0 10 0 * * *"
+# 防封禁：cron 留空/默认的任务会在触发后按任务稳定错峰 0~1800 秒发送，避免大量群同秒发送。
+default_stagger_seconds: 1800
+default_stagger_mode: stable
 
 groups:
   - name: HyVPS 示例
@@ -24,3 +27,5 @@ groups:
     message: "签到"
     parse_bot_command: false
     cron: ""
+    # 可选：单任务覆盖错峰窗口；0 表示关闭。
+    stagger_seconds: 1800
