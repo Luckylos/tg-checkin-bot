@@ -1,0 +1,18 @@
+# secrets / local config
+.env
+config.yml
+*.session
+*.session-journal
+
+# runtime / generated
+data/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/

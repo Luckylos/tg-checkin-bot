@@ -1,0 +1,26 @@
+# Telegram 定时签到配置
+# 推荐使用 -100... 这种数字 chat_id 作为群组唯一标识，避免 username 改名导致失效。
+# 修改后容器会在 CONFIG_RELOAD_SECONDS 周期内自动重载；也可通过控制命令即时修改。
+timezone: Asia/Shanghai
+
+default_delay_seconds: 3
+# 单个任务 cron 留空时使用该默认值；不配置则内置为每天 00:10:00。
+default_cron: "0 10 0 * * *"
+
+groups:
+  - name: HyVPS 示例
+    enabled: true
+    chat_id: -1003849837200
+    # 关键点：BotFather 命令在 Telegram 中不是纯文本，需要以 bot_command entity 发送。
+    message: /checkin@HyVPS_Bot
+    parse_bot_command: true
+    # cron 可留空；留空默认每天 00:10。这里示例为每天 09:05:00。
+    cron: "0 5 9 * * *"
+    run_on_start: false
+
+  - name: 默认时间示例
+    enabled: false
+    chat_id: -1001234567890
+    message: "签到"
+    parse_bot_command: false
+    cron: ""
