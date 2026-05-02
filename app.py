@@ -325,12 +325,14 @@ class CheckinApp:
             return (
                 "命令：\n"
                 "/id - 显示当前 chat_id 和 user_id\n"
-                "/list - 列出任务\n"
-                "/add <name> <chat_id> <cron|-> <message...>，cron 用 - 表示默认每天 00:10\n"
-                "/del <name>\n"
-                "/enable <name> | /disable <name>\n"
-                "/set <name> cron <expr|-> | message <text> | chat_id <id>\n"
-                "/test <name> - 立即发送一次"
+                "/list - 列出任务；群内使用时优先显示本群任务\n"
+                "/add <message...> - 在当前群自动用群名和 chat_id 添加，默认每天 00:10\n"
+                "/add <cron|-> <message...> - 当前群指定 cron，cron 用 _ 代替空格\n"
+                "/add <name> <chat_id> <cron|-> <message...> - 完整模式\n"
+                "/del [name]，群内省略 name 时删除本群任务\n"
+                "/enable [name] | /disable [name]\n"
+                "/set [name] cron <expr|-> | message <text> | chat_id <id>\n"
+                "/test [name] - 立即发送一次"
             )
         if cmd == "/id":
             return f"chat_id={event.chat_id}\nuser_id={event.sender_id}"
@@ -340,70 +342,143 @@ class CheckinApp:
         if not isinstance(groups, list):
             raise ValueError("config groups must be a list")
 
+        async def current_chat_name() -> str:
+            entity = await event.get_chat()
+            for attr in ("title", "first_name", "username"):
+                value = getattr(entity, attr, None)
+                if value:
+                    return str(value)
+            return f"chat_{event.chat_id}"
+
+        def display_cron(value: str) -> str:
+            return value or DEFAULT_CRON
+
         def find_index(name: str) -> int:
             for i, item in enumerate(groups):
                 if str(item.get("name")) == name:
                     return i
             raise ValueError(f"任务不存在：{name}")
 
+        def find_index_by_chat_id(chat_id: int) -> int:
+            matches = []
+            for i, item in enumerate(groups):
+                chat_value = item.get("chat_id", item.get("chat"))
+                if chat_value is not None and normalize_chat_id(chat_value) == chat_id:
+                    matches.append(i)
+            if not matches:
+                raise ValueError(f"当前群未配置任务：chat_id={chat_id}")
+            if len(matches) > 1:
+                names = ", ".join(str(groups[i].get("name")) for i in matches)
+                raise ValueError(f"当前群匹配到多个任务，请指定 name：{names}")
+            return matches[0]
+
+        def resolve_index(optional_name: Optional[str]) -> int:
+            if optional_name:
+                return find_index(optional_name)
+            return find_index_by_chat_id(normalize_chat_id(event.chat_id))
+
         if cmd == "/list":
             if not groups:
                 return "暂无任务。"
-            lines = []
+            current_id = normalize_chat_id(event.chat_id)
+            scoped = []
             for item in groups:
+                chat_value = item.get("chat_id", item.get("chat"))
+                if chat_value is not None and normalize_chat_id(chat_value) == current_id:
+                    scoped.append(item)
+            show_groups = scoped or groups
+            header = "本群任务：" if scoped else "任务列表："
+            lines = []
+            for item in show_groups:
                 state = "启用" if item.get("enabled", True) else "禁用"
-                lines.append(f"- {item.get('name')}: {state}, chat_id={item.get('chat_id', item.get('chat'))}, cron={item.get('cron')}, msg={item.get('message')}")
-            return "任务列表：\n" + "\n".join(lines)
+                lines.append(f"- {item.get('name')}: {state}, chat_id={item.get('chat_id', item.get('chat'))}, cron={display_cron(str(item.get('cron') or ''))}, msg={item.get('message')}")
+            return header + "\n" + "\n".join(lines)
 
         if cmd == "/add":
-            if len(args) < 4:
-                return "用法：/add <name> <chat_id> <cron|-> <message...>；cron 如 0_5_9_*_*_*，- 表示默认每天 00:10。"
-            name, chat_id_raw, cron_raw = args[0], args[1], args[2]
-            if any(str(item.get("name")) == name for item in groups):
-                raise ValueError(f"任务已存在：{name}")
+            # Full mode: /add <name> <chat_id> <cron|-> <message...>
+            if len(args) >= 4:
+                try:
+                    normalize_chat_id(args[1])
+                    full_mode = True
+                except ValueError:
+                    full_mode = False
+            else:
+                full_mode = False
+
+            if full_mode:
+                name, chat_id_raw, cron_raw = args[0], args[1], args[2]
+                message = " ".join(args[3:])
+            else:
+                if len(args) < 1:
+                    return "用法：群内 /add <message...> 或 /add <cron|-> <message...>；完整模式 /add <name> <chat_id> <cron|-> <message...>"
+                name = await current_chat_name()
+                chat_id_raw = str(event.chat_id)
+                if args[0] in {"-", "default", "默认"} or len(args[0].replace("_", " ").split()) in {5, 6}:
+                    cron_raw = args[0]
+                    message = " ".join(args[1:])
+                    if not message:
+                        return "用法：/add <cron|-> <message...>；message 不能为空"
+                else:
+                    cron_raw = "-"
+                    message = " ".join(args)
+
+            chat_id = normalize_chat_id(chat_id_raw)
+            existing_names = {str(item.get("name")) for item in groups}
+            base_name = name
+            suffix = 2
+            while name in existing_names:
+                name = f"{base_name}-{suffix}"
+                suffix += 1
+            if any(normalize_chat_id(item.get("chat_id", item.get("chat"))) == chat_id for item in groups if item.get("chat_id", item.get("chat")) is not None):
+                raise ValueError(f"当前 chat_id 已存在任务；如需修改请用 /set 或先 /del：{chat_id}")
             cron = DEFAULT_CRON if cron_raw in {"-", "default", "默认"} else cron_raw.replace("_", " ")
-            message = " ".join(args[3:])
             job = {
                 "name": name,
                 "enabled": True,
-                "chat_id": normalize_chat_id(chat_id_raw),
+                "chat_id": chat_id,
                 "message": message,
                 "parse_bot_command": True,
                 "cron": "" if cron == DEFAULT_CRON and cron_raw in {"-", "default", "默认"} else cron,
                 "run_on_start": False,
             }
-            # validate before saving
             parsed_job = parse_jobs({"groups": [job]})[0]
             cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
             groups.append(job)
             save_config(self.config_path, config)
             await self.force_reload_after_write()
-            return f"已添加：{name}"
+            return f"已添加：{name}\nchat_id={chat_id}\ncron={display_cron(str(job.get('cron') or ''))}\nmessage={message}"
 
         if cmd == "/del":
-            if len(args) != 1:
-                return "用法：/del <name>"
-            idx = find_index(args[0])
+            if len(args) > 1:
+                return "用法：/del [name]"
+            idx = resolve_index(args[0] if args else None)
             removed = groups.pop(idx)
             save_config(self.config_path, config)
             await self.force_reload_after_write()
             return f"已删除：{removed.get('name')}"
 
         if cmd in {"/enable", "/disable"}:
-            if len(args) != 1:
-                return f"用法：{cmd} <name>"
-            idx = find_index(args[0])
+            if len(args) > 1:
+                return f"用法：{cmd} [name]"
+            idx = resolve_index(args[0] if args else None)
             groups[idx]["enabled"] = cmd == "/enable"
             save_config(self.config_path, config)
             await self.force_reload_after_write()
-            return f"已{'启用' if cmd == '/enable' else '禁用'}：{args[0]}"
+            return f"已{'启用' if cmd == '/enable' else '禁用'}：{groups[idx].get('name')}"
 
         if cmd == "/set":
-            if len(args) < 3:
-                return "用法：/set <name> cron <expr|-> | message <text> | chat_id <id>"
-            idx = find_index(args[0])
-            field = args[1]
-            value = " ".join(args[2:])
+            if len(args) < 2:
+                return "用法：/set [name] cron <expr|-> | message <text> | chat_id <id>"
+            if args[0] in {"cron", "message", "chat_id"}:
+                idx = resolve_index(None)
+                field = args[0]
+                value = " ".join(args[1:])
+            else:
+                if len(args) < 3:
+                    return "用法：/set <name> cron <expr|-> | message <text> | chat_id <id>"
+                idx = resolve_index(args[0])
+                field = args[1]
+                value = " ".join(args[2:])
             if field == "cron":
                 if value in {"-", "default", "默认", ""}:
                     value = ""
@@ -422,15 +497,17 @@ class CheckinApp:
                 return "字段只支持：cron、message、chat_id"
             save_config(self.config_path, config)
             await self.force_reload_after_write()
-            return f"已更新：{args[0]} {field}"
+            return f"已更新：{groups[idx].get('name')} {field}"
 
         if cmd == "/test":
-            if len(args) != 1:
-                return "用法：/test <name>"
+            if len(args) > 1:
+                return "用法：/test [name]"
+            idx = resolve_index(args[0] if args else None)
+            target_name = str(groups[idx].get("name"))
             jobs = parse_jobs(config)
-            job = next((j for j in jobs if j.name == args[0]), None)
+            job = next((j for j in jobs if j.name == target_name), None)
             if not job:
-                raise ValueError(f"任务不存在：{args[0]}")
+                raise ValueError(f"任务不存在：{target_name}")
             await self.send_job(job)
             return f"已测试发送：{job.name}"
 
