@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./config.yml:/config/config.yml:rw
+      - ./config:/config:rw
     security_opt:
       - no-new-privileges:true
     cap_drop:

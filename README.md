@@ -9,7 +9,7 @@ Docker 环境下基于 `TG_API_ID` / `TG_API_HASH` / `TG_SESSION_STRING` 的 Tel
 - Docker Compose 部署。
 - 使用用户本地生成的 `TG_SESSION_STRING`，服务器不交互输入手机号/验证码，降低敏感信息泄露风险。
 - 推荐使用 `-100...` 数字 `chat_id` 作为群组唯一标识，避免群组 username 改名导致失效。
-- `config.yml` 自由添加/删除群组、消息内容和 cron 时间。
+- `config/config.yml` 自由添加/删除群组、消息内容和 cron 时间。
 - `cron` 支持留空；留空默认每天 `00:10`。
 - 支持通过 Telegram 消息控制添加/删除/启用/禁用/修改/测试任务。
 - 自动重载配置文件。
@@ -21,7 +21,8 @@ Docker 环境下基于 `TG_API_ID` / `TG_API_HASH` / `TG_SESSION_STRING` 的 Tel
 ```bash
 cd /root/tg-checkin-bot
 cp .env.example .env
-cp config.example.yml config.yml
+mkdir -p config
+cp config.example.yml config/config.yml
 chmod 600 .env
 ```
 
@@ -59,7 +60,7 @@ PY
 
 ## 配置任务
 
-编辑 `config.yml`，添加需要签到的群组：
+编辑 `config/config.yml`，添加需要签到的群组：
 
 ```yaml
 timezone: Asia/Shanghai
