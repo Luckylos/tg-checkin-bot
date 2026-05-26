@@ -146,3 +146,4 @@ def test_load_and_save_config_atomic(tmp_path):
 
     assert load_config(str(path)) == {"timezone": "Asia/Shanghai", "groups": []}
     assert not (tmp_path / ".config.yml.tmp").exists()
+    assert path.stat().st_mode & 0o777 == 0o600

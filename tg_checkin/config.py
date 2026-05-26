@@ -40,6 +40,7 @@ def save_config(path: str, config: dict[str, Any]) -> None:
     tmp = target.with_name(f".{target.name}.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
+    os.chmod(tmp, 0o600)
     os.replace(tmp, target)
 
 

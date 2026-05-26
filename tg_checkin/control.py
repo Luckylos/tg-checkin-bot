@@ -110,7 +110,12 @@ class ControlService:
 
     async def _add(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
         full_mode = len(args) >= 4 and is_chat_id(args[1])
-        task_mode = len(args) >= 3 and not full_mode and not is_default_alias(args[0]) and looks_like_cron(args[1])
+        task_mode = (
+            len(args) >= 3
+            and not full_mode
+            and not is_default_alias(args[0])
+            and (looks_like_cron(args[1]) or is_default_alias(args[1]))
+        )
         if full_mode:
             name, chat_id_raw, cron_raw = args[0], args[1], args[2]
             message = " ".join(args[3:])
@@ -351,10 +356,13 @@ def task_group_for_validation(group: dict[str, Any], task: dict[str, Any]) -> di
 def resolve_target(groups: list[dict[str, Any]], chat_id: int, optional_name: str | None) -> ResolvedTarget:
     if optional_name:
         name = str(optional_name)
+        scoped_matches: list[ResolvedTarget] = []
+        global_matches: list[ResolvedTarget] = []
         for group_index, group in enumerate(groups):
             group_name = str(group.get("name"))
             if group_name == name:
-                return ResolvedTarget(group_index)
+                target = ResolvedTarget(group_index)
+                (scoped_matches if same_chat(group, chat_id) else global_matches).append(target)
             tasks = group.get("tasks")
             if isinstance(tasks, list):
                 for task_index, task in enumerate(tasks):
@@ -362,7 +370,14 @@ def resolve_target(groups: list[dict[str, Any]], chat_id: int, optional_name: st
                         continue
                     task_name = str(task.get("name"))
                     if name in {task_name, f"{group_name}/{task_name}"}:
-                        return ResolvedTarget(group_index, task_index)
+                        target = ResolvedTarget(group_index, task_index)
+                        (scoped_matches if same_chat(group, chat_id) else global_matches).append(target)
+        matches = scoped_matches or global_matches
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            names = ", ".join(target_job_name(groups, target) for target in matches)
+            raise ValueError(f"匹配到多个任务，请指定完整 name：{names}")
         raise ValueError(f"任务不存在：{optional_name}")
 
     matches: list[ResolvedTarget] = []

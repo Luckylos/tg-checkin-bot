@@ -120,6 +120,25 @@ async def test_group_context_add_appends_tasks_with_different_messages_to_same_c
     assert jobs == []
 
 
+async def test_group_context_add_task_accepts_default_alias_cron():
+    h = Harness()
+    service = h.service()
+    ctx = ControlContext(chat_id=-1003849837200, sender_id=123, chat_name="HyVPS")
+
+    reply = await service.run("/add", ["morning", "-", "/checkin@HyVPS_Bot"], ctx)
+
+    assert "已添加：HyVPS/morning" in reply
+    assert h.config["groups"] == [
+        {
+            "name": "HyVPS",
+            "enabled": True,
+            "chat_id": -1003849837200,
+            "parse_bot_command": True,
+            "tasks": [{"name": "morning", "cron": "", "message": "/checkin@HyVPS_Bot", "run_on_start": False}],
+        }
+    ]
+
+
 async def test_task_group_commands_resolve_child_task_names():
     h = Harness()
     h.config["groups"] = [
@@ -144,11 +163,37 @@ async def test_task_group_commands_resolve_child_task_names():
     assert await service.run("/test", ["公益Plus/Team机器人/签到"], ctx) == "已测试发送：公益Plus/Team机器人/签到"
     assert h.sent[-1].name == "公益Plus/Team机器人/签到"
 
+    assert await service.run("/test", ["签到"], ctx) == "已测试发送：公益Plus/Team机器人/签到"
+    assert h.sent[-1].name == "公益Plus/Team机器人/签到"
+
     assert await service.run("/disable", ["PP_PLUS1"], ctx) == "已禁用：公益Plus/Team机器人/PP_PLUS1"
     assert h.config["groups"][0]["tasks"][1]["enabled"] is False
 
     assert await service.run("/set", ["PP_PLUS1", "message", "新内容"], ctx) == "已更新：公益Plus/Team机器人/PP_PLUS1 message"
     assert h.config["groups"][0]["tasks"][1]["message"] == "新内容"
+
+
+async def test_short_task_name_resolution_prefers_current_chat():
+    h = Harness()
+    h.config["groups"] = [
+        {
+            "name": "Other",
+            "enabled": True,
+            "chat_id": -1001,
+            "tasks": [{"name": "签到", "cron": "", "message": "other", "run_on_start": False}],
+        },
+        {
+            "name": "Current",
+            "enabled": True,
+            "chat_id": -1002,
+            "tasks": [{"name": "签到", "cron": "", "message": "current", "run_on_start": False}],
+        },
+    ]
+    service = h.service()
+    ctx = ControlContext(chat_id=-1002, sender_id=123, chat_name="Current")
+
+    assert await service.run("/test", ["签到"], ctx) == "已测试发送：Current/签到"
+    assert h.sent[-1].message == "current"
 
 
 async def test_set_cron_accepts_underscore_and_default_alias():
