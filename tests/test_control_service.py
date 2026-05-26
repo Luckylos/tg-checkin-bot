@@ -120,6 +120,37 @@ async def test_group_context_add_appends_tasks_with_different_messages_to_same_c
     assert jobs == []
 
 
+async def test_task_group_commands_resolve_child_task_names():
+    h = Harness()
+    h.config["groups"] = [
+        {
+            "name": "公益Plus/Team机器人",
+            "enabled": True,
+            "chat_id": 8604751086,
+            "parse_bot_command": True,
+            "tasks": [
+                {"name": "签到", "cron": "", "message": "📅 每日签到", "run_on_start": False},
+                {"name": "PP_PLUS1", "cron": "5 0 0 * * *", "message": "💎 Plus 成品号(PP渠道) · 3积分", "run_on_start": False},
+            ],
+        }
+    ]
+    service = h.service()
+    ctx = ControlContext(chat_id=8604751086, sender_id=123, chat_name="公益Plus/Team机器人")
+
+    assert await service.run("/test", ["PP_PLUS1"], ctx) == "已测试发送：公益Plus/Team机器人/PP_PLUS1"
+    assert h.sent[-1].name == "公益Plus/Team机器人/PP_PLUS1"
+    assert h.sent[-1].message == "💎 Plus 成品号(PP渠道) · 3积分"
+
+    assert await service.run("/test", ["公益Plus/Team机器人/签到"], ctx) == "已测试发送：公益Plus/Team机器人/签到"
+    assert h.sent[-1].name == "公益Plus/Team机器人/签到"
+
+    assert await service.run("/disable", ["PP_PLUS1"], ctx) == "已禁用：公益Plus/Team机器人/PP_PLUS1"
+    assert h.config["groups"][0]["tasks"][1]["enabled"] is False
+
+    assert await service.run("/set", ["PP_PLUS1", "message", "新内容"], ctx) == "已更新：公益Plus/Team机器人/PP_PLUS1 message"
+    assert h.config["groups"][0]["tasks"][1]["message"] == "新内容"
+
+
 async def test_set_cron_accepts_underscore_and_default_alias():
     h = Harness()
     h.config["groups"] = [{"name": "A", "chat_id": -1001, "message": "签到", "cron": "0 5 9 * * *"}]

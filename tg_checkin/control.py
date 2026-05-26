@@ -10,6 +10,7 @@ from .scheduler import cron_trigger
 CONTROL_COMMANDS = {"/help", "/id", "/list", "/add", "/del", "/enable", "/disable", "/set", "/test"}
 DEFAULT_ALIASES = {"-", "default", "默认"}
 CONFIG_FIELDS = {"cron", "message", "chat_id"}
+TASK_FIELDS = {"cron", "message", "parse_bot_command", "delay_seconds", "run_on_start", "stagger_seconds", "stagger_mode"}
 GROUP_TASK_FIELDS = {"message", "parse_bot_command", "delay_seconds", "run_on_start", "stagger_seconds", "stagger_mode"}
 
 
@@ -26,6 +27,16 @@ class ControlContext:
     chat_id: int
     sender_id: int | None
     chat_name: str
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    group_index: int
+    task_index: int | None = None
+
+    @property
+    def is_task(self) -> bool:
+        return self.task_index is not None
 
 
 class ControlService:
@@ -76,12 +87,25 @@ class ControlService:
         lines = []
         for item in show_groups:
             state = "启用" if item.get("enabled", True) else "禁用"
-            lines.append(
-                f"- {item.get('name')}: {state}, "
-                f"chat_id={item.get('chat_id', item.get('chat'))}, "
-                f"cron={display_cron(str(item.get('cron') or ''))}, "
-                f"msg={item.get('message')}"
-            )
+            tasks = item.get("tasks")
+            if isinstance(tasks, list):
+                for task in tasks:
+                    if not isinstance(task, dict):
+                        continue
+                    task_state = "启用" if item.get("enabled", True) and task.get("enabled", True) else "禁用"
+                    lines.append(
+                        f"- {item.get('name')}/{task.get('name')}: {task_state}, "
+                        f"chat_id={item.get('chat_id', item.get('chat'))}, "
+                        f"cron={display_cron(str(task.get('cron') or item.get('cron') or ''))}, "
+                        f"msg={task.get('message', item.get('message'))}"
+                    )
+            else:
+                lines.append(
+                    f"- {item.get('name')}: {state}, "
+                    f"chat_id={item.get('chat_id', item.get('chat'))}, "
+                    f"cron={display_cron(str(item.get('cron') or ''))}, "
+                    f"msg={item.get('message')}"
+                )
         return header + "\n" + "\n".join(lines)
 
     async def _add(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
@@ -117,9 +141,7 @@ class ControlService:
             if not message:
                 return "用法：/add <task> <cron|-> <message...>；message 不能为空"
             group = ensure_task_group(groups, ctx.chat_id, ctx.chat_name)
-            tasks = group.setdefault("tasks", [])
-            if not isinstance(tasks, list):
-                raise ValueError(f"{group.get('name')}: tasks must be a list")
+            tasks = ensure_tasks_list(group)
             task = build_task(unique_task_name(task_name, tasks), cron_raw, message)
             parsed_job = parse_jobs({"groups": [task_group_for_validation(group, task)]})[0]
             cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
@@ -160,57 +182,50 @@ class ControlService:
     async def _delete(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
         if len(args) > 1:
             return "用法：/del [name]"
-        idx = resolve_index(groups, ctx.chat_id, args[0] if args else None)
-        removed = groups.pop(idx)
+        target = resolve_target(groups, ctx.chat_id, args[0] if args else None)
+        if target.is_task:
+            group = groups[target.group_index]
+            tasks = ensure_tasks_list(group)
+            removed = tasks.pop(target.task_index)  # type: ignore[arg-type]
+            if not tasks:
+                groups.pop(target.group_index)
+            await self._persist(config)
+            return f"已删除：{group.get('name')}/{removed.get('name')}"
+        removed = groups.pop(target.group_index)
         await self._persist(config)
         return f"已删除：{removed.get('name')}"
 
     async def _toggle(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext, *, enabled: bool) -> str:
         if len(args) > 1:
             return "用法：/enable [name]" if enabled else "用法：/disable [name]"
-        idx = resolve_index(groups, ctx.chat_id, args[0] if args else None)
-        groups[idx]["enabled"] = enabled
+        target = resolve_target(groups, ctx.chat_id, args[0] if args else None)
+        label = set_enabled(groups, target, enabled)
         await self._persist(config)
-        return f"已{'启用' if enabled else '禁用'}：{groups[idx].get('name')}"
+        return f"已{'启用' if enabled else '禁用'}：{label}"
 
     async def _set(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
         if len(args) < 2:
             return "用法：/set [name] cron <expr|-> | message <text> | chat_id <id>"
         if args[0] in CONFIG_FIELDS:
-            idx = resolve_index(groups, ctx.chat_id, None)
+            target = resolve_target(groups, ctx.chat_id, None)
             field = args[0]
             value = " ".join(args[1:])
         else:
             if len(args) < 3:
                 return "用法：/set <name> cron <expr|-> | message <text> | chat_id <id>"
-            idx = resolve_index(groups, ctx.chat_id, args[0])
+            target = resolve_target(groups, ctx.chat_id, args[0])
             field = args[1]
             value = " ".join(args[2:])
 
-        if field == "cron":
-            if is_default_alias(value) or value == "":
-                value = ""
-                effective_cron = DEFAULT_CRON
-            else:
-                value = value.replace("_", " ")
-                effective_cron = value
-            cron_trigger(effective_cron, str(config.get("timezone") or "Asia/Shanghai"))
-            groups[idx]["cron"] = value
-        elif field == "message":
-            groups[idx]["message"] = value
-        elif field == "chat_id":
-            groups[idx]["chat_id"] = normalize_chat_id(value)
-            groups[idx].pop("chat", None)
-        else:
-            return "字段只支持：cron、message、chat_id"
+        label = set_field(groups, target, field, value, str(config.get("timezone") or "Asia/Shanghai"))
         await self._persist(config)
-        return f"已更新：{groups[idx].get('name')} {field}"
+        return f"已更新：{label} {field}"
 
     async def _test(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
         if len(args) > 1:
             return "用法：/test [name]"
-        idx = resolve_index(groups, ctx.chat_id, args[0] if args else None)
-        target_name = str(groups[idx].get("name"))
+        target = resolve_target(groups, ctx.chat_id, args[0] if args else None)
+        target_name = target_job_name(groups, target)
         jobs = parse_jobs(config)
         job = next((j for j in jobs if j.name == target_name), None)
         if not job:
@@ -294,6 +309,13 @@ def build_task(name: str, cron_raw: str, message: str) -> dict[str, Any]:
     }
 
 
+def ensure_tasks_list(group: dict[str, Any]) -> list[dict[str, Any]]:
+    tasks = group.setdefault("tasks", [])
+    if not isinstance(tasks, list):
+        raise ValueError(f"{group.get('name')}: tasks must be a list")
+    return tasks
+
+
 def ensure_task_group(groups: list[dict[str, Any]], chat_id: int, chat_name: str) -> dict[str, Any]:
     matches = [item for item in groups if same_chat(item, chat_id)]
     if matches:
@@ -302,9 +324,7 @@ def ensure_task_group(groups: list[dict[str, Any]], chat_id: int, chat_name: str
             task = build_task("default", str(group.pop("cron", "")), str(group.pop("message")))
             task["run_on_start"] = bool(group.pop("run_on_start", False))
             group["tasks"] = [task]
-        tasks = group.setdefault("tasks", [])
-        if not isinstance(tasks, list):
-            raise ValueError(f"{group.get('name')}: tasks must be a list")
+        ensure_tasks_list(group)
         return group
     group = {
         "name": unique_name(chat_name, groups),
@@ -318,9 +338,7 @@ def ensure_task_group(groups: list[dict[str, Any]], chat_id: int, chat_name: str
 
 
 def task_group_for_validation(group: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
-    tasks = group.get("tasks")
-    if not isinstance(tasks, list):
-        raise ValueError(f"{group.get('name')}: tasks must be a list")
+    ensure_tasks_list(group)
     task = dict(task)
     task["parse_bot_command"] = bool(task.get("parse_bot_command", group.get("parse_bot_command", True)))
     validation_group = {
@@ -330,16 +348,93 @@ def task_group_for_validation(group: dict[str, Any], task: dict[str, Any]) -> di
     return validation_group
 
 
-def resolve_index(groups: list[dict[str, Any]], chat_id: int, optional_name: str | None) -> int:
+def resolve_target(groups: list[dict[str, Any]], chat_id: int, optional_name: str | None) -> ResolvedTarget:
     if optional_name:
-        for i, item in enumerate(groups):
-            if str(item.get("name")) == optional_name:
-                return i
+        name = str(optional_name)
+        for group_index, group in enumerate(groups):
+            group_name = str(group.get("name"))
+            if group_name == name:
+                return ResolvedTarget(group_index)
+            tasks = group.get("tasks")
+            if isinstance(tasks, list):
+                for task_index, task in enumerate(tasks):
+                    if not isinstance(task, dict):
+                        continue
+                    task_name = str(task.get("name"))
+                    if name in {task_name, f"{group_name}/{task_name}"}:
+                        return ResolvedTarget(group_index, task_index)
         raise ValueError(f"任务不存在：{optional_name}")
-    matches = [i for i, item in enumerate(groups) if same_chat(item, chat_id)]
+
+    matches: list[ResolvedTarget] = []
+    for group_index, group in enumerate(groups):
+        if not same_chat(group, chat_id):
+            continue
+        tasks = group.get("tasks")
+        if isinstance(tasks, list):
+            for task_index, task in enumerate(tasks):
+                if isinstance(task, dict):
+                    matches.append(ResolvedTarget(group_index, task_index))
+        else:
+            matches.append(ResolvedTarget(group_index))
     if not matches:
         raise ValueError(f"当前群未配置任务：chat_id={chat_id}")
     if len(matches) > 1:
-        names = ", ".join(str(groups[i].get("name")) for i in matches)
+        names = ", ".join(target_job_name(groups, target) for target in matches)
         raise ValueError(f"当前群匹配到多个任务，请指定 name：{names}")
     return matches[0]
+
+
+def target_job_name(groups: list[dict[str, Any]], target: ResolvedTarget) -> str:
+    group = groups[target.group_index]
+    group_name = str(group.get("name"))
+    if target.task_index is None:
+        return group_name
+    tasks = ensure_tasks_list(group)
+    task = tasks[target.task_index]
+    return f"{group_name}/{task.get('name')}"
+
+
+def set_enabled(groups: list[dict[str, Any]], target: ResolvedTarget, enabled: bool) -> str:
+    if target.task_index is None:
+        groups[target.group_index]["enabled"] = enabled
+    else:
+        ensure_tasks_list(groups[target.group_index])[target.task_index]["enabled"] = enabled
+    return target_job_name(groups, target)
+
+
+def set_field(groups: list[dict[str, Any]], target: ResolvedTarget, field: str, value: str, timezone: str) -> str:
+    group = groups[target.group_index]
+    if target.task_index is None:
+        if field not in CONFIG_FIELDS:
+            raise ValueError("字段只支持：cron、message、chat_id")
+        holder = group
+    else:
+        if field == "chat_id":
+            holder = group
+        elif field in TASK_FIELDS:
+            holder = ensure_tasks_list(group)[target.task_index]
+        else:
+            raise ValueError("字段只支持：cron、message、chat_id")
+
+    if field == "cron":
+        if is_default_alias(value) or value == "":
+            value = ""
+            effective_cron = DEFAULT_CRON
+        else:
+            value = value.replace("_", " ")
+            effective_cron = value
+        cron_trigger(effective_cron, timezone)
+        holder["cron"] = value
+    elif field == "message":
+        holder["message"] = value
+    elif field == "chat_id":
+        group["chat_id"] = normalize_chat_id(value)
+        group.pop("chat", None)
+    else:
+        raise ValueError("字段只支持：cron、message、chat_id")
+    return target_job_name(groups, target)
+
+
+# Backward-compatible helper retained for old tests/imports.
+def resolve_index(groups: list[dict[str, Any]], chat_id: int, optional_name: str | None) -> int:
+    return resolve_target(groups, chat_id, optional_name).group_index
