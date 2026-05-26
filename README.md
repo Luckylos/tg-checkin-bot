@@ -10,6 +10,7 @@ Docker 环境下基于 `TG_API_ID` / `TG_API_HASH` / `TG_SESSION_STRING` 的 Tel
 - 使用用户本地生成的 `TG_SESSION_STRING`，服务器不交互输入手机号/验证码，降低敏感信息泄露风险。
 - 推荐使用 `-100...` 数字 `chat_id` 作为群组唯一标识，避免群组 username 改名导致失效。
 - `config/config.yml` 自由添加/删除群组、消息内容和 cron 时间。
+- 同一群组可配置多个任务/多个时间段，适合早晚签到、补签或不同机器人命令。
 - `cron` 支持留空；留空默认每天 `00:10`。
 - 默认 cron 任务支持自动错峰发送，避免大量群组在同一秒集中签到。
 - 支持通过 Telegram 消息控制添加/删除/启用/禁用/修改/测试任务。
@@ -77,8 +78,21 @@ groups:
     chat_id: -1003849837200
     message: /checkin@HyVPS_Bot
     parse_bot_command: true
+    # 方式 1：单任务群组，兼容旧配置。
     cron: ""   # 留空默认每天 00:10
     run_on_start: false
+
+  - name: HyVPS 多时间段
+    enabled: true
+    chat_id: -1003849837200
+    message: /checkin@HyVPS_Bot
+    parse_bot_command: true
+    # 方式 2：同一群组多个任务。任务会展开为 HyVPS 多时间段/morning、HyVPS 多时间段/night。
+    tasks:
+      - name: morning
+        cron: "0 10 9 * * *"
+      - name: night
+        cron: "0 10 21 * * *"
 ```
 
 启动：
@@ -170,6 +184,7 @@ tests/                 # 行为回归测试
 
 - `chat_id`：推荐填写 `-100...` 数字群组 ID，作为稳定唯一标识。
 - `message`：要发送的签到内容。
+- `tasks`：可选，同一 `groups[]` 下配置多个子任务/时间段；子任务继承群组级 `message`、`parse_bot_command`、`delay_seconds`、`run_on_start`、`stagger_*`，也可以单独覆盖。运行时任务名为 `<群组 name>/<任务 name>`，因此同一群内 `/del`、`/set`、`/test` 遇到多任务时需要指定完整任务名。
 - `parse_bot_command`：为 `true` 时，如果消息以 `/xxx` 或 `/xxx@BotName` 开头，会发送 Telegram bot command entity，而不是纯文本。
 - `cron`：
   - 留空：默认每天 `00:10`

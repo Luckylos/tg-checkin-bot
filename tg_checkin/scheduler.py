@@ -36,7 +36,7 @@ def stable_stagger_offset(job: JobConfig) -> int:
         return 0
     if job.stagger_mode == "random":
         return int(time.time_ns() % (job.stagger_seconds + 1))
-    seed = f"{job.name}:{job.chat_id}:{job.message}".encode("utf-8")
+    seed = f"{job.name}:{job.chat_id}:{job.cron}:{job.message}".encode("utf-8")
     return int.from_bytes(hashlib.sha256(seed).digest()[:8], "big") % (job.stagger_seconds + 1)
 
 

@@ -82,19 +82,16 @@ async def test_group_context_set_enable_disable_delete_and_test():
     assert h.config["groups"] == []
 
 
-async def test_full_mode_add_and_duplicate_chat_rejected():
+async def test_full_mode_add_allows_duplicate_chat_for_multiple_time_slots():
     h = Harness()
     service = h.service()
     ctx = ControlContext(chat_id=1, sender_id=123, chat_name="private")
 
-    await service.run("/add", ["HyVPS", "-1003849837200", "-", "/checkin@HyVPS_Bot"], ctx)
+    await service.run("/add", ["HyVPS-morning", "-1003849837200", "0_10_9_*_*_*", "/checkin@HyVPS_Bot"], ctx)
+    await service.run("/add", ["HyVPS-night", "-1003849837200", "0_10_21_*_*_*", "/checkin@HyVPS_Bot"], ctx)
 
-    try:
-        await service.run("/add", ["Other", "-1003849837200", "-", "签到"], ctx)
-    except ValueError as exc:
-        assert "当前 chat_id 已存在任务" in str(exc)
-    else:
-        raise AssertionError("duplicate chat_id should fail")
+    assert [item["name"] for item in h.config["groups"]] == ["HyVPS-morning", "HyVPS-night"]
+    assert [item["cron"] for item in h.config["groups"]] == ["0 10 9 * * *", "0 10 21 * * *"]
 
 
 async def test_set_cron_accepts_underscore_and_default_alias():

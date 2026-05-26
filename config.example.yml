@@ -17,15 +17,24 @@ groups:
     # 关键点：BotFather 命令在 Telegram 中不是纯文本，需要以 bot_command entity 发送。
     message: /checkin@HyVPS_Bot
     parse_bot_command: true
-    # cron 可留空；留空默认每天 00:10。这里示例为每天 09:05:00。
+    # 旧格式仍支持：单个群组直接配置一个 cron。
     cron: "0 5 9 * * *"
     run_on_start: false
 
-  - name: 默认时间示例
+  - name: 同群多时间段示例
     enabled: false
     chat_id: -1001234567890
-    message: "签到"
-    parse_bot_command: false
-    cron: ""
-    # 可选：单任务覆盖错峰窗口；0 表示关闭。
+    message: /checkin@SomeBot
+    parse_bot_command: true
+    # 新格式：同一群组下多个任务。子任务继承群组级 message/parse_bot_command，也可覆盖。
+    tasks:
+      - name: morning
+        cron: "0 10 9 * * *"
+      - name: night
+        cron: "0 10 21 * * *"
+      - name: custom-message
+        cron: "0 0 23 * * *"
+        message: "签到"
+        parse_bot_command: false
+    # 可选：任务级未覆盖时继承该错峰窗口；0 表示关闭。
     stagger_seconds: 1800

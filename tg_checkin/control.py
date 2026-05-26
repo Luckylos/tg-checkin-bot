@@ -103,8 +103,6 @@ class ControlService:
                 message = " ".join(args)
 
         chat_id = normalize_chat_id(chat_id_raw)
-        if any(same_chat(item, chat_id) for item in groups):
-            raise ValueError(f"当前 chat_id 已存在任务；如需修改请用 /set 或先 /del：{chat_id}")
         name = unique_name(name, groups)
         cron = DEFAULT_CRON if is_default_alias(cron_raw) else cron_raw.replace("_", " ")
         job = {
