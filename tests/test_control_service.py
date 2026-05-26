@@ -82,16 +82,42 @@ async def test_group_context_set_enable_disable_delete_and_test():
     assert h.config["groups"] == []
 
 
-async def test_full_mode_add_allows_duplicate_chat_for_multiple_time_slots():
+async def test_full_mode_add_allows_duplicate_chat_for_different_messages_at_different_times():
     h = Harness()
     service = h.service()
     ctx = ControlContext(chat_id=1, sender_id=123, chat_name="private")
 
     await service.run("/add", ["HyVPS-morning", "-1003849837200", "0_10_9_*_*_*", "/checkin@HyVPS_Bot"], ctx)
-    await service.run("/add", ["HyVPS-night", "-1003849837200", "0_10_21_*_*_*", "/checkin@HyVPS_Bot"], ctx)
+    await service.run("/add", ["HyVPS-night", "-1003849837200", "0_10_21_*_*_*", "/sign@OtherBot"], ctx)
 
     assert [item["name"] for item in h.config["groups"]] == ["HyVPS-morning", "HyVPS-night"]
     assert [item["cron"] for item in h.config["groups"]] == ["0 10 9 * * *", "0 10 21 * * *"]
+    assert [item["message"] for item in h.config["groups"]] == ["/checkin@HyVPS_Bot", "/sign@OtherBot"]
+
+
+async def test_group_context_add_appends_tasks_with_different_messages_to_same_chat_group():
+    h = Harness()
+    service = h.service()
+    ctx = ControlContext(chat_id=-1003849837200, sender_id=123, chat_name="HyVPS")
+
+    await service.run("/add", ["morning", "0_10_9_*_*_*", "/checkin@HyVPS_Bot"], ctx)
+    await service.run("/add", ["night", "0_10_21_*_*_*", "/sign@OtherBot"], ctx)
+
+    assert h.config["groups"] == [
+        {
+            "name": "HyVPS",
+            "enabled": True,
+            "chat_id": -1003849837200,
+            "parse_bot_command": True,
+            "tasks": [
+                {"name": "morning", "cron": "0 10 9 * * *", "message": "/checkin@HyVPS_Bot", "run_on_start": False},
+                {"name": "night", "cron": "0 10 21 * * *", "message": "/sign@OtherBot", "run_on_start": False},
+            ],
+        }
+    ]
+
+    jobs = [job for job in h.sent]
+    assert jobs == []
 
 
 async def test_set_cron_accepts_underscore_and_default_alias():

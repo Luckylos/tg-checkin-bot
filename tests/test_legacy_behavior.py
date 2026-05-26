@@ -32,7 +32,7 @@ def test_parse_jobs_defaults_and_stagger_behavior():
     assert jobs[3].stagger_seconds == 0
 
 
-def test_parse_jobs_supports_group_tasks_for_multiple_time_slots():
+def test_parse_jobs_supports_group_tasks_for_different_messages_at_different_times():
     jobs = parse_jobs(
         {
             "default_delay_seconds": 5,
@@ -41,11 +41,10 @@ def test_parse_jobs_supports_group_tasks_for_multiple_time_slots():
                     "name": "HyVPS",
                     "enabled": True,
                     "chat_id": "-1003849837200",
-                    "message": "/checkin@HyVPS_Bot",
                     "parse_bot_command": True,
                     "tasks": [
-                        {"name": "morning", "cron": "0 10 9 * * *"},
-                        {"name": "night", "cron": "0 10 21 * * *", "enabled": False},
+                        {"name": "morning", "cron": "0 10 9 * * *", "message": "/checkin@HyVPS_Bot"},
+                        {"name": "night", "cron": "0 10 21 * * *", "message": "/sign@OtherBot", "enabled": False},
                     ],
                 }
             ],
@@ -55,10 +54,30 @@ def test_parse_jobs_supports_group_tasks_for_multiple_time_slots():
     assert [job.name for job in jobs] == ["HyVPS/morning", "HyVPS/night"]
     assert {job.chat_id for job in jobs} == {-1003849837200}
     assert [job.cron for job in jobs] == ["0 10 9 * * *", "0 10 21 * * *"]
-    assert [job.message for job in jobs] == ["/checkin@HyVPS_Bot", "/checkin@HyVPS_Bot"]
+    assert [job.message for job in jobs] == ["/checkin@HyVPS_Bot", "/sign@OtherBot"]
     assert jobs[0].enabled is True
     assert jobs[1].enabled is False
     assert jobs[0].delay_seconds == 5
+
+
+def test_parse_jobs_allows_group_message_as_task_default():
+    jobs = parse_jobs(
+        {
+            "groups": [
+                {
+                    "name": "HyVPS",
+                    "chat_id": -1001,
+                    "message": "/default@Bot",
+                    "tasks": [
+                        {"name": "default", "cron": "0 10 9 * * *"},
+                        {"name": "override", "cron": "0 10 21 * * *", "message": "签到"},
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert [job.message for job in jobs] == ["/default@Bot", "签到"]
 
 
 def test_parse_jobs_rejects_duplicate_job_names():

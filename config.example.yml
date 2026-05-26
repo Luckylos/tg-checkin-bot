@@ -24,15 +24,16 @@ groups:
   - name: 同群多时间段示例
     enabled: false
     chat_id: -1001234567890
-    message: /checkin@SomeBot
     parse_bot_command: true
-    # 新格式：同一群组下多个任务。子任务继承群组级 message/parse_bot_command，也可覆盖。
+    # 新格式：同一群组下多个任务，每个任务可以在不同时间发送不同内容。
     tasks:
       - name: morning
         cron: "0 10 9 * * *"
+        message: /checkin@SomeBot
       - name: night
         cron: "0 10 21 * * *"
-      - name: custom-message
+        message: /sign@OtherBot
+      - name: text-message
         cron: "0 0 23 * * *"
         message: "签到"
         parse_bot_command: false

@@ -10,6 +10,7 @@ from .scheduler import cron_trigger
 CONTROL_COMMANDS = {"/help", "/id", "/list", "/add", "/del", "/enable", "/disable", "/set", "/test"}
 DEFAULT_ALIASES = {"-", "default", "默认"}
 CONFIG_FIELDS = {"cron", "message", "chat_id"}
+GROUP_TASK_FIELDS = {"message", "parse_bot_command", "delay_seconds", "run_on_start", "stagger_seconds", "stagger_mode"}
 
 
 def parse_control_command(text: str) -> tuple[str, list[str]]:
@@ -85,28 +86,64 @@ class ControlService:
 
     async def _add(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
         full_mode = len(args) >= 4 and is_chat_id(args[1])
+        task_mode = len(args) >= 3 and not full_mode and not is_default_alias(args[0]) and looks_like_cron(args[1])
         if full_mode:
             name, chat_id_raw, cron_raw = args[0], args[1], args[2]
             message = " ".join(args[3:])
-        else:
-            if not args:
-                return "用法：群内 /add <message...> 或 /add <cron|-> <message...>；完整模式 /add <name> <chat_id> <cron|-> <message...>"
-            name = ctx.chat_name
-            chat_id_raw = str(ctx.chat_id)
-            if is_default_alias(args[0]) or looks_like_cron(args[0]):
-                cron_raw = args[0]
-                message = " ".join(args[1:])
-                if not message:
-                    return "用法：/add <cron|-> <message...>；message 不能为空"
-            else:
-                cron_raw = "-"
-                message = " ".join(args)
+            chat_id = normalize_chat_id(chat_id_raw)
+            cron = DEFAULT_CRON if is_default_alias(cron_raw) else cron_raw.replace("_", " ")
+            job = {
+                "name": unique_name(name, groups),
+                "enabled": True,
+                "chat_id": chat_id,
+                "message": message,
+                "parse_bot_command": True,
+                "cron": "" if cron == DEFAULT_CRON and is_default_alias(cron_raw) else cron,
+                "run_on_start": False,
+            }
+            parsed_job = parse_jobs({"groups": [job]})[0]
+            cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
+            groups.append(job)
+            await self._persist(config)
+            return f"已添加：{job['name']}\nchat_id={chat_id}\ncron={display_cron(str(job.get('cron') or ''))}\nmessage={message}"
 
-        chat_id = normalize_chat_id(chat_id_raw)
-        name = unique_name(name, groups)
+        if not args:
+            return "用法：群内 /add <message...> 或 /add <task> <cron|-> <message...>；完整模式 /add <name> <chat_id> <cron|-> <message...>"
+
+        if task_mode:
+            task_name = args[0]
+            cron_raw = args[1]
+            message = " ".join(args[2:])
+            if not message:
+                return "用法：/add <task> <cron|-> <message...>；message 不能为空"
+            group = ensure_task_group(groups, ctx.chat_id, ctx.chat_name)
+            tasks = group.setdefault("tasks", [])
+            if not isinstance(tasks, list):
+                raise ValueError(f"{group.get('name')}: tasks must be a list")
+            task = build_task(unique_task_name(task_name, tasks), cron_raw, message)
+            parsed_job = parse_jobs({"groups": [task_group_for_validation(group, task)]})[0]
+            cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
+            tasks.append(task)
+            await self._persist(config)
+            return (
+                f"已添加：{group.get('name')}/{task['name']}\n"
+                f"chat_id={ctx.chat_id}\ncron={display_cron(str(task.get('cron') or ''))}\nmessage={message}"
+            )
+
+        name = ctx.chat_name
+        chat_id = normalize_chat_id(str(ctx.chat_id))
+        if is_default_alias(args[0]) or looks_like_cron(args[0]):
+            cron_raw = args[0]
+            message = " ".join(args[1:])
+            if not message:
+                return "用法：/add <cron|-> <message...>；message 不能为空"
+        else:
+            cron_raw = "-"
+            message = " ".join(args)
+
         cron = DEFAULT_CRON if is_default_alias(cron_raw) else cron_raw.replace("_", " ")
         job = {
-            "name": name,
+            "name": unique_name(name, groups),
             "enabled": True,
             "chat_id": chat_id,
             "message": message,
@@ -118,7 +155,7 @@ class ControlService:
         cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
         groups.append(job)
         await self._persist(config)
-        return f"已添加：{name}\nchat_id={chat_id}\ncron={display_cron(str(job.get('cron') or ''))}\nmessage={message}"
+        return f"已添加：{job['name']}\nchat_id={chat_id}\ncron={display_cron(str(job.get('cron') or ''))}\nmessage={message}"
 
     async def _delete(self, config: dict[str, Any], groups: list[dict[str, Any]], args: list[str], ctx: ControlContext) -> str:
         if len(args) > 1:
@@ -191,8 +228,9 @@ def help_text() -> str:
         "命令：\n"
         "/id - 显示当前 chat_id 和 user_id\n"
         "/list - 列出任务；群内使用时优先显示本群任务\n"
-        "/add <message...> - 在当前群自动用群名和 chat_id 添加，默认每天 00:10，且自动错峰发送\n"
-        "/add <cron|-> <message...> - 当前群指定 cron，cron 用 _ 代替空格；显式 cron 默认不自动错峰\n"
+        "/add <message...> - 在当前群添加单任务，默认每天 00:10，且自动错峰发送\n"
+        "/add <cron|-> <message...> - 当前群添加单任务并指定 cron，cron 用 _ 代替空格\n"
+        "/add <task> <cron|-> <message...> - 当前群添加子任务；用于不同时间发送不同内容\n"
         "/add <name> <chat_id> <cron|-> <message...> - 完整模式\n"
         "/del [name]，群内省略 name 时删除本群任务\n"
         "/enable [name] | /disable [name]\n"
@@ -234,6 +272,62 @@ def unique_name(name: str, groups: list[dict[str, Any]]) -> str:
         name = f"{base_name}-{suffix}"
         suffix += 1
     return name
+
+
+def unique_task_name(name: str, tasks: list[dict[str, Any]]) -> str:
+    existing_names = {str(item.get("name")) for item in tasks}
+    base_name = name
+    suffix = 2
+    while name in existing_names:
+        name = f"{base_name}-{suffix}"
+        suffix += 1
+    return name
+
+
+def build_task(name: str, cron_raw: str, message: str) -> dict[str, Any]:
+    cron = DEFAULT_CRON if is_default_alias(cron_raw) else cron_raw.replace("_", " ")
+    return {
+        "name": name,
+        "cron": "" if cron == DEFAULT_CRON and is_default_alias(cron_raw) else cron,
+        "message": message,
+        "run_on_start": False,
+    }
+
+
+def ensure_task_group(groups: list[dict[str, Any]], chat_id: int, chat_name: str) -> dict[str, Any]:
+    matches = [item for item in groups if same_chat(item, chat_id)]
+    if matches:
+        group = matches[0]
+        if "tasks" not in group:
+            task = build_task("default", str(group.pop("cron", "")), str(group.pop("message")))
+            task["run_on_start"] = bool(group.pop("run_on_start", False))
+            group["tasks"] = [task]
+        tasks = group.setdefault("tasks", [])
+        if not isinstance(tasks, list):
+            raise ValueError(f"{group.get('name')}: tasks must be a list")
+        return group
+    group = {
+        "name": unique_name(chat_name, groups),
+        "enabled": True,
+        "chat_id": normalize_chat_id(chat_id),
+        "parse_bot_command": True,
+        "tasks": [],
+    }
+    groups.append(group)
+    return group
+
+
+def task_group_for_validation(group: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+    tasks = group.get("tasks")
+    if not isinstance(tasks, list):
+        raise ValueError(f"{group.get('name')}: tasks must be a list")
+    task = dict(task)
+    task["parse_bot_command"] = bool(task.get("parse_bot_command", group.get("parse_bot_command", True)))
+    validation_group = {
+        key: value for key, value in group.items() if key in {"name", "enabled", "chat_id", "chat", *GROUP_TASK_FIELDS}
+    }
+    validation_group["tasks"] = [task]
+    return validation_group
 
 
 def resolve_index(groups: list[dict[str, Any]], chat_id: int, optional_name: str | None) -> int:

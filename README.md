@@ -85,14 +85,16 @@ groups:
   - name: HyVPS 多时间段
     enabled: true
     chat_id: -1003849837200
-    message: /checkin@HyVPS_Bot
     parse_bot_command: true
-    # 方式 2：同一群组多个任务。任务会展开为 HyVPS 多时间段/morning、HyVPS 多时间段/night。
+    # 方式 2：同一群组多个任务；每个任务可以配置不同时间和不同内容。
+    # 任务会展开为 HyVPS 多时间段/morning、HyVPS 多时间段/night。
     tasks:
       - name: morning
         cron: "0 10 9 * * *"
+        message: /checkin@HyVPS_Bot
       - name: night
         cron: "0 10 21 * * *"
+        message: /sign@OtherBot
 ```
 
 启动：
@@ -140,6 +142,7 @@ docker-compose run --rm --entrypoint pytest tg-checkin -q
 /list
 /add <message...>
 /add <cron|-> <message...>
+/add <task> <cron|-> <message...>
 /add <name> <chat_id> <cron|-> <message...>
 /del [name]
 /enable [name]
@@ -153,9 +156,13 @@ docker-compose run --rm --entrypoint pytest tg-checkin -q
 由于 Telegram 消息用空格分隔，控制命令里的 cron 建议用下划线代替空格，程序会自动还原。`-` 表示默认每天 `00:10`：
 
 ```text
-# 在目标群内自动添加当前群
+# 在目标群内自动添加当前群：单任务兼容模式
 /add /checkin@HyVPS_Bot
 /add 0_10_9_*_*_* /checkin@HyVPS_Bot
+
+# 在目标群内添加多个子任务：不同时间发送不同内容
+/add morning 0_10_9_*_*_* /checkin@HyVPS_Bot
+/add night 0_10_21_*_*_* /sign@OtherBot
 
 # 在当前群内修改/测试
 /set cron 0_10_9_*_*_*
@@ -183,8 +190,8 @@ tests/                 # 行为回归测试
 ## 配置说明
 
 - `chat_id`：推荐填写 `-100...` 数字群组 ID，作为稳定唯一标识。
-- `message`：要发送的签到内容。
-- `tasks`：可选，同一 `groups[]` 下配置多个子任务/时间段；子任务继承群组级 `message`、`parse_bot_command`、`delay_seconds`、`run_on_start`、`stagger_*`，也可以单独覆盖。运行时任务名为 `<群组 name>/<任务 name>`，因此同一群内 `/del`、`/set`、`/test` 遇到多任务时需要指定完整任务名。
+- `message`：要发送的签到内容。单任务格式写在群组级；多任务格式建议写在每个 `tasks[]` 子任务里，以便不同时间发送不同内容。
+- `tasks`：可选，同一 `groups[]` 下配置多个子任务/时间段；每个子任务都可以写自己的 `message`、`cron`、`parse_bot_command`。子任务未写时才继承群组级 `message`、`parse_bot_command`、`delay_seconds`、`run_on_start`、`stagger_*`。运行时任务名为 `<群组 name>/<任务 name>`，因此同一群内 `/del`、`/set`、`/test` 遇到多任务时需要指定完整任务名。
 - `parse_bot_command`：为 `true` 时，如果消息以 `/xxx` 或 `/xxx@BotName` 开头，会发送 Telegram bot command entity，而不是纯文本。
 - `cron`：
   - 留空：默认每天 `00:10`
