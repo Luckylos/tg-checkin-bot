@@ -1,31 +1,41 @@
-# Telegram 定时签到配置
-# 推荐使用 -100... 这种数字 chat_id 作为群组唯一标识，避免 username 改名导致失效。
-# 修改后容器会在 CONFIG_RELOAD_SECONDS 周期内自动重载；也可通过控制命令即时修改。
+# Telegram 用户号定时签到 / 按钮式 bot 流程配置示例
+#
+# 使用方法：
+#   cp config.example.yml config/config.yml
+#   chmod 600 config/config.yml
+#   编辑 config/config.yml 后运行：
+#   docker compose run --rm --no-deps tg-checkin python /app/app.py validate /config/config.yml
+#
+# 说明：
+# - 群组推荐使用 -100... 数字 chat_id。
+# - bot/用户私聊可使用 username，例如 freexzteam_bot 或 @freexzteam_bot。
+# - 普通每日签到用 message。
+# - 需要按菜单一步步走的 bot 用 flow。
+
 timezone: Asia/Shanghai
 
 default_delay_seconds: 3
-# 单个任务 cron 留空时使用该默认值；不配置则内置为每天 00:10:00。
+# cron 留空时使用该默认值；6 字段含义：秒 分 时 日 月 星期。
 default_cron: "0 10 0 * * *"
-# 防封禁：cron 留空/默认的任务会在触发后按任务稳定错峰 0~1800 秒发送，避免大量群同秒发送。
+# 默认 cron 任务会稳定错峰 0~1800 秒，避免多个任务同秒发送。
 default_stagger_seconds: 1800
 default_stagger_mode: stable
 
 groups:
+  # 示例 1：普通单任务签到。
   - name: HyVPS 示例
     enabled: true
     chat_id: -1003849837200
-    # 关键点：BotFather 命令在 Telegram 中不是纯文本，需要以 bot_command entity 发送。
     message: /checkin@HyVPS_Bot
     parse_bot_command: true
-    # 旧格式仍支持：单个群组直接配置一个 cron。
-    cron: "0 5 9 * * *"
+    cron: "" # 留空 = default_cron，每天 00:10:00
     run_on_start: false
 
+  # 示例 2：同一目标多个时间段。
   - name: 同群多时间段示例
     enabled: false
     chat_id: -1001234567890
     parse_bot_command: true
-    # 新格式：同一群组下多个任务，每个任务可以在不同时间发送不同内容。
     tasks:
       - name: morning
         cron: "0 10 9 * * *"
@@ -37,9 +47,10 @@ groups:
         cron: "0 0 23 * * *"
         message: "签到"
         parse_bot_command: false
-    # 可选：任务级未覆盖时继承该错峰窗口；0 表示关闭。
     stagger_seconds: 1800
 
+  # 示例 3：按钮式 bot 状态机。
+  # 普通签到 message 和兑换 flow 可以共存；不要删除每日签到任务。
   - name: 按钮状态机示例
     enabled: false
     chat_id: example_bot
@@ -49,6 +60,7 @@ groups:
         cron: ""
         message: "📅 每日签到"
         run_on_start: false
+
       - name: plus兑换
         cron: "0 0 0 * * *"
         run_on_start: false
@@ -67,4 +79,5 @@ groups:
               - "兑换"
               - "上限"
               - "积分不足"
+              - "成功"
             timeout_seconds: 25
