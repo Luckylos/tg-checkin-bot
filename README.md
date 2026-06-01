@@ -180,19 +180,22 @@ app.py                 # 兼容入口，转发到 tg_checkin.cli
 tg_checkin/cli.py      # CLI：run / validate / auth 禁用提示
 tg_checkin/app.py      # 运行时编排：Telegram client、APScheduler、配置热加载
 tg_checkin/config.py   # YAML 配置读写、环境变量和任务解析
+tg_checkin/flow.py     # ReplyKeyboard/按钮式 bot 状态机执行器
+tg_checkin/flow_config.py # flow 配置解析与校验
 tg_checkin/control.py  # Telegram outgoing 控制命令解析与持久化修改
 tg_checkin/scheduler.py# cron 和错峰调度辅助
-tg_checkin/telegram.py # Telethon client/session 和 bot_command entity
+tg_checkin/telegram.py # Telethon client/session、实体解析和 bot_command entity
 tg_checkin/models.py   # 数据模型与基础校验
 tests/                 # 行为回归测试
 ```
 
 ## 配置说明
 
-- `chat_id`：推荐填写 `-100...` 数字群组 ID，作为稳定唯一标识。
-- `message`：要发送的签到内容。单任务格式写在群组级；多任务格式建议写在每个 `tasks[]` 子任务里，以便不同时间发送不同内容。
-- `tasks`：可选，同一 `groups[]` 下配置多个子任务/时间段；每个子任务都可以写自己的 `message`、`cron`、`parse_bot_command`。子任务未写时才继承群组级 `message`、`parse_bot_command`、`delay_seconds`、`run_on_start`、`stagger_*`。运行时任务名为 `<群组 name>/<任务 name>`，因此同一群内 `/del`、`/set`、`/test` 遇到多任务时需要指定完整任务名。
-- `parse_bot_command`：为 `true` 时，如果消息以 `/xxx` 或 `/xxx@BotName` 开头，会发送 Telegram bot command entity，而不是纯文本。
+- `chat_id`：推荐群组填写 `-100...` 数字 ID；私聊 bot/用户可填写 username（如 `freexzteam_bot`，也可带 `@`）。
+- `message`：要发送的签到内容。单任务格式写在群组级；多任务格式建议写在每个 `tasks[]` 子任务里，以便不同时间发送不同内容。原每日签到这种单消息任务继续使用 `message`，不会受 `flow` 影响。
+- `flow`：可选，按钮式 bot 状态机。每个 step 支持 `send`、`expect`、`expect_any`、`timeout_seconds`、`delay_seconds`。运行器每步发送后等待 bot 回复，并同时检查回复正文和按钮文本；不符合预期会失败停止，避免上下文丢失后继续误发。
+- `tasks`：可选，同一 `groups[]` 下配置多个子任务/时间段；每个子任务都可以写自己的 `message` 或 `flow`、`cron`、`parse_bot_command`。子任务未写时才继承群组级 `message`、`flow`、`parse_bot_command`、`delay_seconds`、`run_on_start`、`stagger_*`。运行时任务名为 `<群组 name>/<任务 name>`，因此同一群内 `/del`、`/set`、`/test` 遇到多任务时需要指定完整任务名。
+- `parse_bot_command`：为 `true` 时，如果消息以 `/xxx` 或 `/xxx@BotName` 开头，会发送 Telegram bot command entity，而不是纯文本；`flow[].send` 同样适用。
 - `cron`：
   - 留空：默认每天 `00:10`
   - 5 字段：`分 时 日 月 星期`

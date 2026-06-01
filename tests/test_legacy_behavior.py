@@ -111,8 +111,10 @@ def test_normalize_chat_id_rejects_bool_and_text():
     assert normalize_chat_id(-1003849837200) == -1003849837200
     with pytest.raises(ValueError):
         normalize_chat_id(True)
+    assert normalize_chat_id("@group") == "group"
+    assert normalize_chat_id("freexzteam_bot") == "freexzteam_bot"
     with pytest.raises(ValueError):
-        normalize_chat_id("@group")
+        normalize_chat_id("bad chat!")
 
 
 def test_cron_trigger_accepts_five_and_six_fields():

@@ -69,3 +69,23 @@ def create_client(session_string: str, api_id: int, api_hash: str) -> TelegramCl
             return TelegramClient(db_uri, api_id, api_hash)
 
     return TelegramClient(StringSession(session_string), api_id, api_hash)
+
+
+async def resolve_send_entity(client: TelegramClient, chat_id: int | str):
+    """Resolve configured numeric IDs or usernames before sending.
+
+    Positive user/bot IDs require an access_hash. After a fresh StringSession,
+    Telethon can know the dialog but still fail get_input_entity(<int>); walking
+    dialogs hydrates/returns the entity for known users and keeps group IDs
+    working through the normal fast path.
+    """
+    if isinstance(chat_id, str):
+        return await client.get_input_entity(chat_id)
+    try:
+        return await client.get_input_entity(chat_id)
+    except ValueError as first_error:
+        async for dialog in client.iter_dialogs(limit=None):
+            entity = dialog.entity
+            if getattr(entity, "id", None) == chat_id:
+                return await client.get_input_entity(entity)
+        raise first_error

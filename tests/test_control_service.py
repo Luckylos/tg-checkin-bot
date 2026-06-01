@@ -82,6 +82,17 @@ async def test_group_context_set_enable_disable_delete_and_test():
     assert h.config["groups"] == []
 
 
+async def test_full_mode_add_accepts_username_target():
+    h = Harness()
+    service = h.service()
+    ctx = ControlContext(chat_id=1, sender_id=123, chat_name="private")
+
+    reply = await service.run("/add", ["Bot", "@freexzteam_bot", "-", "📅 每日签到"], ctx)
+
+    assert "chat_id=freexzteam_bot" in reply
+    assert h.config["groups"][0]["chat_id"] == "freexzteam_bot"
+
+
 async def test_full_mode_add_allows_duplicate_chat_for_different_messages_at_different_times():
     h = Harness()
     service = h.service()

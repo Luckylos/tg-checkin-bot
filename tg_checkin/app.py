@@ -10,9 +10,10 @@ from telethon import events
 
 from .config import load_config, parse_jobs, save_config
 from .control import CONTROL_COMMANDS, ControlContext, ControlService, parse_control_command
+from .flow import BotFlowRunner
 from .models import AppSettings, JobConfig
 from .scheduler import cron_trigger, maybe_stagger_job
-from .telegram import command_entities, create_client
+from .telegram import command_entities, create_client, resolve_send_entity
 
 
 class CheckinApp:
@@ -21,6 +22,7 @@ class CheckinApp:
         self.client = create_client(settings.session_string, settings.api_id, settings.api_hash)
         self.scheduler = AsyncIOScheduler()
         self.logger = logging.getLogger("tg-checkin")
+        self.flow_runner = BotFlowRunner(self.client, logger=self.logger)
         self._config_mtime: float | None = None
         self._started_jobs: set[str] = set()
         self._stop_event = asyncio.Event()
@@ -44,6 +46,15 @@ class CheckinApp:
     async def send_job(self, job: JobConfig, *, apply_stagger: bool = False) -> None:
         if apply_stagger:
             await maybe_stagger_job(job)
+        entity = await resolve_send_entity(self.client, job.chat_id)
+        if job.flow:
+            await self.flow_runner.run(job, entity)
+        else:
+            await self.send_single_message_job(job, entity)
+        if job.delay_seconds > 0:
+            await asyncio.sleep(job.delay_seconds)
+
+    async def send_single_message_job(self, job: JobConfig, entity) -> None:
         entities = command_entities(job.message, job.parse_bot_command)
         self.logger.info(
             "sending job=%s chat_id=%s message=%r bot_command_entity=%s",
@@ -52,9 +63,7 @@ class CheckinApp:
             job.message,
             bool(entities),
         )
-        await self.client.send_message(job.chat_id, job.message, formatting_entities=entities)
-        if job.delay_seconds > 0:
-            await asyncio.sleep(job.delay_seconds)
+        await self.client.send_message(entity, job.message, formatting_entities=entities)
 
     async def reload_config(self) -> None:
         path = Path(self.settings.config_path)
@@ -91,7 +100,7 @@ class CheckinApp:
                 job.stagger_seconds,
                 job.stagger_mode,
             )
-            start_key = f"{job.name}:{job.cron}:{job.chat_id}:{job.message}"
+            start_key = f"{job.name}:{job.cron}:{job.chat_id}:{job.message}:{len(job.flow)}"
             if job.run_on_start and start_key not in self._started_jobs:
                 self._started_jobs.add(start_key)
                 asyncio.create_task(self.send_job(job))

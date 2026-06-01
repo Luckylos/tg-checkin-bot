@@ -39,3 +39,32 @@ groups:
         parse_bot_command: false
     # 可选：任务级未覆盖时继承该错峰窗口；0 表示关闭。
     stagger_seconds: 1800
+
+  - name: 按钮状态机示例
+    enabled: false
+    chat_id: example_bot
+    parse_bot_command: true
+    tasks:
+      - name: 每日签到
+        cron: ""
+        message: "📅 每日签到"
+        run_on_start: false
+      - name: plus兑换
+        cron: "0 0 0 * * *"
+        run_on_start: false
+        flow:
+          - send: "/start"
+            expect: "积分商城"
+            timeout_seconds: 20
+          - send: "🛍️ 积分商城"
+            expect: "Plus 成品号"
+            timeout_seconds: 20
+          - send: "💎 Plus 成品号(PP渠道) · 3积分"
+            expect: "确认兑换"
+            timeout_seconds: 20
+          - send: "✅ 确认兑换"
+            expect_any:
+              - "兑换"
+              - "上限"
+              - "积分不足"
+            timeout_seconds: 25

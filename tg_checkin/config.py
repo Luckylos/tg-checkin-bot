@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from .flow_config import parse_flow
 from .models import (
     DEFAULT_CRON,
     DEFAULT_STAGGER_SECONDS,
@@ -17,6 +18,7 @@ from .models import (
 
 INHERITED_TASK_FIELDS = {
     "message",
+    "flow",
     "parse_bot_command",
     "cron",
     "delay_seconds",
@@ -95,8 +97,8 @@ def _parse_group_jobs(
 
     tasks = item.get("tasks")
     if tasks is None:
-        if "message" not in item:
-            raise ValueError(f"{group_name}: missing message")
+        if "message" not in item and "flow" not in item:
+            raise ValueError(f"{group_name}: missing message or flow")
         return [
             _build_job(
                 source=item,
@@ -122,8 +124,8 @@ def _parse_group_jobs(
             raise ValueError(f"{group_name}.tasks[{task_idx}] must be a mapping")
         task_name = str(task.get("name") or f"task-{task_idx}")
         source = _merge_task_defaults(item, task)
-        if "message" not in source:
-            raise ValueError(f"{group_name}/{task_name}: missing message")
+        if "message" not in source and "flow" not in source:
+            raise ValueError(f"{group_name}/{task_name}: missing message or flow")
         jobs.append(
             _build_job(
                 source=source,
@@ -149,7 +151,7 @@ def _build_job(
     *,
     source: dict[str, Any],
     name: str,
-    chat_id: int,
+    chat_id: int | str,
     group_enabled: bool,
     default_delay: float,
     default_cron: str,
@@ -172,13 +174,14 @@ def _build_job(
         name=name,
         enabled=group_enabled and bool(source.get("enabled", True)),
         chat_id=chat_id,
-        message=str(source["message"]),
+        message=str(source.get("message", "")),
         parse_bot_command=bool(source.get("parse_bot_command", True)),
         cron=cron,
         delay_seconds=float(source.get("delay_seconds", default_delay)),
         run_on_start=bool(source.get("run_on_start", False)),
         stagger_seconds=stagger_seconds,
         stagger_mode=stagger_mode,
+        flow=parse_flow(source.get("flow"), label=name + ".flow"),
     )
 
 

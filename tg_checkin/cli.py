@@ -32,7 +32,11 @@ async def validate() -> None:
     jobs = parse_jobs(config)
     for job in jobs:
         cron_trigger(job.cron, timezone)
-        command_entities(job.message, job.parse_bot_command)
+        if job.flow:
+            for step in job.flow:
+                command_entities(step.send, job.parse_bot_command)
+        else:
+            command_entities(job.message, job.parse_bot_command)
     print(f"OK: {len(jobs)} jobs, timezone={timezone}")
 
 
