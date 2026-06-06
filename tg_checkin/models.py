@@ -1,19 +1,80 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator, Literal
 
 DEFAULT_CRON = "0 10 0 * * *"  # daily 00:10:00
 DEFAULT_STAGGER_SECONDS = 1800
 STAGGER_MODES = {"stable", "random", "off"}
 
+FlowAction = Literal["send", "click", "wait"]
+UnknownPolicy = Literal["retry", "abort"]
+
+
+@dataclass(frozen=True)
+class RepeatPolicy:
+    count: int = 1
+    interval_seconds: float = 0.0
+    jitter_seconds: float = 0.0
+    stop_on_success: bool = True
+    success_quota: int | None = None
+    max_runtime_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class MatchRules:
+    abort_on_text: tuple[str, ...] = field(default_factory=tuple)
+    success_on_text: tuple[str, ...] = field(default_factory=tuple)
+    retry_on_text: tuple[str, ...] = field(default_factory=tuple)
+    unknown_policy: UnknownPolicy = "abort"
+    max_unknown_replies: int = 1
+
+    @property
+    def has_explicit_rules(self) -> bool:
+        return bool(self.abort_on_text or self.success_on_text or self.retry_on_text)
+
 
 @dataclass(frozen=True)
 class FlowStep:
-    send: str
+    action: FlowAction = "send"
+    text: str = ""
+    button: str = ""
     expect_any: tuple[str, ...] = field(default_factory=tuple)
     timeout_seconds: float = 20.0
     delay_seconds: float = 0.0
+
+    @property
+    def send(self) -> str:
+        """Backward-compatible text sent for ReplyKeyboard-style bots."""
+        if self.action == "click":
+            return self.button
+        return self.text
+
+
+@dataclass(frozen=True)
+class FlowSpec:
+    steps: tuple[FlowStep, ...] = field(default_factory=tuple)
+    repeat: RepeatPolicy = field(default_factory=RepeatPolicy)
+    rules: MatchRules = field(default_factory=MatchRules)
+    mode: str = "auto"
+    legacy: bool = False
+
+    def __bool__(self) -> bool:
+        return bool(self.steps)
+
+    def __iter__(self) -> Iterator[FlowStep]:
+        return iter(self.steps)
+
+    def __len__(self) -> int:
+        return len(self.steps)
+
+    def __getitem__(self, index: int) -> FlowStep:
+        return self.steps[index]
+
+    def __eq__(self, other: object) -> bool:
+        if other == ():
+            return self.steps == ()
+        return super().__eq__(other)
 
 
 @dataclass(frozen=True)
@@ -21,6 +82,7 @@ class JobConfig:
     name: str
     enabled: bool
     chat_id: int | str
+    task_type: str
     message: str
     parse_bot_command: bool
     cron: str
@@ -28,7 +90,7 @@ class JobConfig:
     run_on_start: bool
     stagger_seconds: int
     stagger_mode: str
-    flow: tuple[FlowStep, ...] = field(default_factory=tuple)
+    flow: FlowSpec = field(default_factory=FlowSpec)
 
 
 @dataclass(frozen=True)

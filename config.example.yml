@@ -65,19 +65,60 @@ groups:
         cron: "0 0 0 * * *"
         run_on_start: false
         flow:
-          - send: "/start"
-            expect: "积分商城"
-            timeout_seconds: 20
-          - send: "🛍️ 积分商城"
-            expect: "Plus 成品号"
-            timeout_seconds: 20
-          - send: "💎 Plus 成品号(PP渠道) · 3积分"
-            expect: "确认兑换"
-            timeout_seconds: 20
-          - send: "✅ 确认兑换"
-            expect_any:
-              - "兑换"
-              - "上限"
-              - "积分不足"
-              - "成功"
-            timeout_seconds: 25
+          mode: auto
+          repeat:
+            count: 50 # 最大尝试轮数；成功或命中 abort_on_text 会提前停止
+            interval_seconds: 3
+            jitter_seconds: 1
+            stop_on_success: true
+            max_runtime_seconds: 300
+          rules:
+            abort_on_text:
+              - "今日 Plus 成品号上限已满，明天再来"
+              - "今日兑换上限已满"
+              - "明天再来"
+            success_on_text:
+              - "兑换成功"
+              - "领取成功"
+              - "已为你生成"
+            retry_on_text:
+              - "库存不足"
+              - "请稍后再试"
+              - "当前繁忙"
+              - "排队中"
+            unknown_policy: retry
+            max_unknown_replies: 3
+          steps:
+            - action: send
+              text: "/start"
+              expect_any:
+                text:
+                  - "积分商城"
+                buttons:
+                  - "积分商城"
+              timeout_seconds: 20
+            - action: click
+              button: "🛍️ 积分商城"
+              expect_any:
+                text:
+                  - "Plus 成品号"
+                buttons:
+                  - "Plus 成品号"
+              timeout_seconds: 20
+            - action: click
+              button: "💎 Plus 成品号(PP渠道) · 3积分"
+              expect_any:
+                text:
+                  - "确认兑换"
+                  - "今日 Plus 成品号上限已满，明天再来"
+                buttons:
+                  - "确认兑换"
+              timeout_seconds: 20
+            - action: click
+              button: "✅ 确认兑换"
+              expect_any:
+                text:
+                  - "兑换成功"
+                  - "今日 Plus 成品号上限已满，明天再来"
+                  - "库存不足"
+              timeout_seconds: 25

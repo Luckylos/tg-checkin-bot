@@ -170,18 +170,29 @@ def _build_job(
     if stagger_mode == "off":
         stagger_seconds = 0
 
+    flow = parse_flow(source.get("flow"), label=name + ".flow")
+    message = str(source.get("message", ""))
+    task_type = str(source.get("type") or ("flow" if flow else "message")).strip().lower()
+    if task_type not in {"message", "flow"}:
+        raise ValueError(f"{name}: type must be message or flow")
+    if task_type == "message" and not message:
+        raise ValueError(f"{name}: message task requires message")
+    if task_type == "flow" and not flow:
+        raise ValueError(f"{name}: flow task requires flow")
+
     return JobConfig(
         name=name,
         enabled=group_enabled and bool(source.get("enabled", True)),
         chat_id=chat_id,
-        message=str(source.get("message", "")),
+        task_type=task_type,
+        message=message,
         parse_bot_command=bool(source.get("parse_bot_command", True)),
         cron=cron,
         delay_seconds=float(source.get("delay_seconds", default_delay)),
         run_on_start=bool(source.get("run_on_start", False)),
         stagger_seconds=stagger_seconds,
         stagger_mode=stagger_mode,
-        flow=parse_flow(source.get("flow"), label=name + ".flow"),
+        flow=flow,
     )
 
 

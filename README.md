@@ -224,29 +224,72 @@ groups:
         cron: "0 0 0 * * *"
         run_on_start: false
         flow:
-          - send: "/start"
-            expect: "积分商城"
-            timeout_seconds: 20
-          - send: "🛍️ 积分商城"
-            expect: "Plus 成品号"
-            timeout_seconds: 20
-          - send: "💎 Plus 成品号(PP渠道) · 3积分"
-            expect: "确认兑换"
-            timeout_seconds: 20
-          - send: "✅ 确认兑换"
-            expect_any:
-              - "兑换"
-              - "上限"
-              - "积分不足"
-              - "成功"
-            timeout_seconds: 25
+          mode: auto
+          repeat:
+            count: 50
+            interval_seconds: 3
+            jitter_seconds: 1
+            stop_on_success: true
+            max_runtime_seconds: 300
+          rules:
+            abort_on_text:
+              - "今日 Plus 成品号上限已满，明天再来"
+              - "今日兑换上限已满"
+              - "明天再来"
+            success_on_text:
+              - "兑换成功"
+              - "领取成功"
+              - "已为你生成"
+            retry_on_text:
+              - "库存不足"
+              - "请稍后再试"
+              - "当前繁忙"
+              - "排队中"
+            unknown_policy: retry
+            max_unknown_replies: 3
+          steps:
+            - action: send
+              text: "/start"
+              expect_any:
+                text:
+                  - "积分商城"
+                buttons:
+                  - "积分商城"
+              timeout_seconds: 20
+            - action: click
+              button: "🛍️ 积分商城"
+              expect_any:
+                text:
+                  - "Plus 成品号"
+                buttons:
+                  - "Plus 成品号"
+              timeout_seconds: 20
+            - action: click
+              button: "💎 Plus 成品号(PP渠道) · 3积分"
+              expect_any:
+                text:
+                  - "确认兑换"
+                  - "今日 Plus 成品号上限已满，明天再来"
+                buttons:
+                  - "确认兑换"
+              timeout_seconds: 20
+            - action: click
+              button: "✅ 确认兑换"
+              expect_any:
+                text:
+                  - "兑换成功"
+                  - "今日 Plus 成品号上限已满，明天再来"
+                  - "库存不足"
+              timeout_seconds: 25
 ```
 
 注意：
 
+- `repeat.count` 是最大尝试轮数，不是必须跑满；成功、终止文本或 unknown 熔断都可能提前停止。
+- `abort_on_text` 优先级最高；例如命中 `今日 Plus 成品号上限已满，明天再来` 后会立即停止整个 flow。
+- `retry_on_text` 只结束当前轮，等待 `interval_seconds + jitter_seconds` 后进入下一轮。
 - 按钮文本要完全一致，emoji 变体也可能影响识别，例如 `🛍` 和 `🛍️` 不是同一个字符串。
-- `expect` 可以匹配回复正文，也可以匹配 bot 返回的按钮文本。
-- 最后一步应覆盖所有可接受业务结果，例如成功、库存上限、积分不足。
+- `expect` / `expect_any` 可以匹配回复正文，也可以匹配 bot 返回的按钮文本。
 - 如果只想先演练，不要配置最后的 `✅ 确认兑换` 步骤。
 
 ## 配置字段说明
@@ -294,11 +337,44 @@ groups:
 
 `-` 表示使用默认 cron。
 
+### flow 配置字段
+
+兼容两种写法：
+
+- 旧 list 写法：`flow: [{send, expect, expect_any, timeout_seconds, delay_seconds}]`，默认只执行 1 轮。
+- 新结构化写法：`flow: {mode, repeat, rules, steps}`，支持 `count` 轮次、成功/重试/终止规则。
+
+结构化字段：
+
+- `mode`：目前支持 `auto` / `manual`，当前运行器按 `auto` 执行。
+- `repeat.count`：最大尝试轮数，必须大于 0；不是必须跑满。
+- `repeat.interval_seconds`：每轮之间等待秒数。
+- `repeat.jitter_seconds`：每轮额外随机等待秒数。
+- `repeat.stop_on_success`：命中成功文本后是否停止。
+- `repeat.max_runtime_seconds`：整个 flow 最大运行秒数。
+- `rules.abort_on_text`：不可继续文本，优先级最高，命中后立即停止整个 flow。
+- `rules.success_on_text`：成功文本。
+- `rules.retry_on_text`：可重试文本，命中后结束当前轮并进入下一轮。
+- `rules.unknown_policy`：`retry` / `abort`。
+- `rules.max_unknown_replies`：允许 unknown 回复的最大次数。
+
 ### flow step 字段
+
+旧 list 写法：
 
 - `send`：本步骤发送的文本。必填。
 - `expect`：期望回复中包含的单个文本。
 - `expect_any`：期望回复中包含任一文本，字符串或列表均可。
+- `timeout_seconds` / `timeout`：等待回复超时时间，默认 `20` 秒。
+- `delay_seconds` / `delay`：本步骤通过后额外等待时间，默认 `0` 秒。
+
+结构化 `steps` 写法：
+
+- `action`：`send` / `click` / `wait`。
+- `text`：`send` 步骤发送的文本。
+- `button`：`click` 步骤点击/发送的按钮文本；ReplyKeyboard 场景下本质上是发送该按钮文本。
+- `expect`：期望回复中包含的单个文本。
+- `expect_any`：可为字符串、列表，或 `{text: [...], buttons: [...]}`。
 - `timeout_seconds` / `timeout`：等待回复超时时间，默认 `20` 秒。
 - `delay_seconds` / `delay`：本步骤通过后额外等待时间，默认 `0` 秒。
 
