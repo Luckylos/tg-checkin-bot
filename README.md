@@ -343,6 +343,18 @@ groups:
 - `expect_any.buttons`：匹配 bot 回复里出现的按钮文本。
 - 当前底层匹配会把正文和按钮文本合并后做包含匹配，因此按钮和正文都能作为判断依据。
 
+按钮子串自动补全示例：
+
+```yaml
+- action: click
+  button: "成品号"
+  expect_any:
+    text: ["确认兑换", "积分不足"]
+    buttons: ["确认兑换"]
+```
+
+如果 bot 当前真实按钮从 `💎 Plus 成品号(PP渠道) · 3积分` 变成 `💎 Plus 成品号(X渠道) · 5积分`，运行器会在上一条 bot 回复的按钮列表中按 `成品号` 子串匹配，并发送完整实时按钮文本。这样渠道名、积分数、emoji 前缀变化时不用频繁改配置。
+
 ## 示例 4：重复兑换/抢购 flow
 
 这个示例演示“最多重复 50 轮，成功/上限/异常时提前停止”。
@@ -758,16 +770,28 @@ docker compose logs --tail=100 tg-checkin
 2. 先设置 `run_on_start: false`，避免服务启动立即执行。
 3. 先把 `repeat.count` 设为 `1`。
 4. 临时移除最后确认步骤，例如不要发送 `✅ 确认兑换`。
-5. 重启后通过控制命令 `/test <task>` 或临时 cron 触发。
+5. 重启后通过控制命令 `/test <task>`、临时 `run_on_start: true` 或临时 cron 触发。
 6. 看日志确认每一步回复和 `expect_any` 匹配。
-7. 再恢复最后确认步骤并调大 `repeat.count`。
+7. 如果测试按钮子串补全，应重点确认日志里 `send=` 已从短词补全成完整按钮文本。
+8. 再恢复最后确认步骤并调大 `repeat.count`。
+
+安全演练日志示例：
+
+```text
+flow reply ... step=2 ... text='... 💎 Plus 成品号(X渠道) · 5积分 ...'
+flow step ... step=3/3 action=click send='💎 Plus 成品号(X渠道) · 5积分' expect_any=(...)
+flow reply ... step=3 ... text='你选择的是「Plus 成品号(X渠道)」... ✅ 确认兑换 ...'
+```
+
+上面这种演练只跑到确认页，不发送 `✅ 确认兑换`，可验证按钮自动补全而不实际消耗积分。
 
 ### 常见问题
 
 - **flow 在某一步停止，日志提示 unexpected reply**
   - 当前回复没有包含该步骤的 `expect` / `expect_any`。
-  - 用手动账号重新走一遍菜单，复制最新按钮文本。
-  - 检查 emoji 是否完全一致，例如 `🛍` vs `🛍️`。
+  - 用手动账号重新走一遍菜单，确认最新回复正文和按钮文本。
+  - 对会变化的商品按钮，优先把 `button` 写成稳定子串，例如 `成品号`，并在 `expect_any.buttons` 里放同样稳定的菜单关键词。
+  - 检查 emoji 是否完全一致，例如 `🛍` vs `🛍️`；如果 emoji 经常变化，就不要把 emoji 放进稳定子串。
 
 - **命中“今日上限已满”后还继续跑**
   - 确认该文本放在 `rules.abort_on_text`，不是只放在 step 的 `expect_any`。
