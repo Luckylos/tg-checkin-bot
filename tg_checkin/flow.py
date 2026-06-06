@@ -24,7 +24,7 @@ class TelegramMessage(Protocol):
     id: int
     out: bool
     raw_text: str | None
-    buttons: object | None
+    buttons: Any
 
 
 class TelegramClientLike(Protocol):
@@ -150,8 +150,10 @@ class BotFlowRunner:
     async def _run_round(self, job: JobConfig, entity, round_no: int) -> FlowResult:
         last_id = await self._latest_message_id(entity)
         results: list[FlowStepResult] = []
+        previous_reply: TelegramMessage | None = None
         for index, step in enumerate(job.flow, start=1):
-            reply = await self._run_step(job, entity, index, step, after_id=last_id, round_no=round_no)
+            reply = await self._run_step(job, entity, index, step, after_id=last_id, round_no=round_no, previous_reply=previous_reply)
+            previous_reply = reply
             last_id = int(reply.id)
             text = render_reply_text(reply)
             classification = classify_reply(text, job.flow.rules)
@@ -178,8 +180,18 @@ class BotFlowRunner:
             return FlowResult(job.name, tuple(results), status="STOPPED_UNKNOWN_REPLY", round=round_no, reason="no_rule_matched")
         return FlowResult(job.name, tuple(results), status="DONE_SUCCESS", round=round_no, reason="legacy_steps_completed")
 
-    async def _run_step(self, job: JobConfig, entity, index: int, step: FlowStep, *, after_id: int, round_no: int) -> TelegramMessage:
-        send_text = step.send
+    async def _run_step(
+        self,
+        job: JobConfig,
+        entity,
+        index: int,
+        step: FlowStep,
+        *,
+        after_id: int,
+        round_no: int,
+        previous_reply: TelegramMessage | None,
+    ) -> TelegramMessage:
+        send_text = self._resolve_send_text(step, previous_reply)
         entities = command_entities(send_text, job.parse_bot_command) if send_text else None
         self.logger.info(
             "flow step job=%s round=%s step=%s/%s action=%s send=%r expect_any=%s",
@@ -199,6 +211,12 @@ class BotFlowRunner:
         text = render_reply_text(reply)
         self.logger.info("flow reply job=%s round=%s step=%s id=%s text=%r", job.name, round_no, index, reply.id, text[:300])
         return reply
+
+    def _resolve_send_text(self, step: FlowStep, previous_reply: TelegramMessage | None) -> str:
+        if step.action != "click" or not step.button:
+            return step.send
+        button_text = find_button_text(previous_reply, step.button)
+        return button_text or step.button
 
     async def _latest_message_id(self, entity) -> int:
         messages = await self.client.get_messages(entity, limit=1)
@@ -230,7 +248,26 @@ class BotFlowRunner:
 
 def render_reply_text(message: TelegramMessage) -> str:
     parts = [message.raw_text or ""]
-    if message.buttons:
-        for row in message.buttons:
-            parts.extend(str(getattr(button, "text", "")) for button in row)
+    parts.extend(iter_button_texts(message))
     return "\n".join(part for part in parts if part)
+
+
+def find_button_text(message: TelegramMessage | None, needle: str) -> str | None:
+    if not message or not needle:
+        return None
+    for text in iter_button_texts(message):
+        if needle in text:
+            return text
+    return None
+
+
+def iter_button_texts(message: TelegramMessage) -> tuple[str, ...]:
+    if not message.buttons:
+        return ()
+    texts: list[str] = []
+    for row in message.buttons:
+        for button in row:
+            text = str(getattr(button, "text", ""))
+            if text:
+                texts.append(text)
+    return tuple(texts)

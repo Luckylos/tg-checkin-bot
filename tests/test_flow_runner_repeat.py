@@ -15,7 +15,7 @@ class FakeMessage:
 
 
 class FakeTelegramClient:
-    def __init__(self, replies: list[str]):
+    def __init__(self, replies: list[str | FakeMessage]):
         self._next_id = 1
         self.replies = list(replies)
         self.sent: list[str] = []
@@ -36,9 +36,13 @@ class FakeTelegramClient:
             async def __aiter__(self_inner):
                 if client.reply_index < len(client.replies):
                     client._next_id += 1
-                    text = client.replies[client.reply_index]
+                    reply = client.replies[client.reply_index]
                     client.reply_index += 1
-                    yield FakeMessage(client._next_id, text, out=False)
+                    if isinstance(reply, FakeMessage):
+                        reply.id = client._next_id
+                        yield reply
+                    else:
+                        yield FakeMessage(client._next_id, reply, out=False)
 
         return _Iter()
 
@@ -75,6 +79,41 @@ async def test_flow_count_stops_early_on_abort_text_and_does_not_run_next_round(
     assert result.round == 3
     assert result.matched_text == ABORT_TEXT
     assert len(client.sent) == 3
+
+
+async def test_click_step_resolves_button_by_substring_before_sending_full_label():
+    class Button:
+        def __init__(self, text: str):
+            self.text = text
+
+    job = parse_jobs(
+        {
+            "groups": [
+                {
+                    "name": "PlusBot",
+                    "chat_id": "freexzteam_bot",
+                    "flow": {
+                        "repeat": {"count": 1},
+                        "steps": [
+                            {"action": "send", "text": "🛍️ 积分商城", "expect_any": {"buttons": ["成品号"]}},
+                            {"action": "click", "button": "成品号", "expect_any": "确认兑换"},
+                        ],
+                    },
+                }
+            ]
+        }
+    )[0]
+    client = FakeTelegramClient(
+        [
+            FakeMessage(0, "商品列表", buttons=[[Button("💎 Plus 成品号(X渠道) · 5积分")]]),
+            "请确认兑换",
+        ]
+    )
+
+    result = await BotFlowRunner(client).run(job, object())
+
+    assert result.status == "DONE_SUCCESS"
+    assert client.sent == ["🛍️ 积分商城", "💎 Plus 成品号(X渠道) · 5积分"]
 
 
 async def test_flow_count_reaches_limit_when_every_round_is_retry():

@@ -106,7 +106,7 @@ groups:
                   - "Plus 成品号"
               timeout_seconds: 20
             - action: click
-              button: "💎 Plus 成品号(PP渠道) · 3积分"
+              button: "成品号"
               expect_any:
                 text:
                   - "确认兑换"

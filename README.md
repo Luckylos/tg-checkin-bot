@@ -317,7 +317,7 @@ groups:
               timeout_seconds: 20
 
             - action: click
-              button: "💎 Plus 成品号(PP渠道) · 3积分"
+              button: "成品号"
               expect_any:
                 text:
                   - "确认兑换"
@@ -338,7 +338,7 @@ groups:
 说明：
 
 - `action: send`：发送普通文本，例如 `/start`。
-- `action: click`：发送按钮文本，适合 ReplyKeyboard / 菜单按钮类 bot。
+- `action: click`：发送按钮文本，适合 ReplyKeyboard / 菜单按钮类 bot；`button` 可以写完整按钮名，也可以只写稳定子串，运行时会从上一条 bot 回复的按钮中自动补全完整文本。
 - `expect_any.text`：匹配 bot 回复正文。
 - `expect_any.buttons`：匹配 bot 回复里出现的按钮文本。
 - 当前底层匹配会把正文和按钮文本合并后做包含匹配，因此按钮和正文都能作为判断依据。
@@ -398,7 +398,7 @@ groups:
               timeout_seconds: 20
 
             - action: click
-              button: "💎 Plus 成品号(PP渠道) · 3积分"
+              button: "成品号"
               expect_any:
                 text:
                   - "确认兑换"
