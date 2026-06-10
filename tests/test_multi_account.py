@@ -22,12 +22,7 @@ def test_parse_jobs_supports_multiple_accounts_with_isolated_names():
                         }
                     ],
                 },
-                {
-                    "name": "bob",
-                    "groups": [
-                        {"name": "BotA", "chat_id": "bot_a", "cron": "0 2 9 * * *", "message": "/checkin"}
-                    ],
-                },
+                {"name": "bob", "groups": [{"name": "BotA", "chat_id": "bot_a", "cron": "0 2 9 * * *", "message": "/checkin"}]},
             ]
         }
     )
@@ -40,7 +35,9 @@ def test_parse_jobs_supports_multiple_accounts_with_isolated_names():
 def test_parse_jobs_rejects_duplicate_account_names():
     config = {"accounts": [{"name": "same", "groups": []}, {"name": "same", "groups": []}]}
     with pytest.raises(ValueError, match="duplicate account name"):
-        parse_accounts(config, AppSettings(), require_secrets=False)
+        parse_jobs(config)
+    with pytest.raises(ValueError, match="duplicate account name"):
+        parse_accounts(config, require_secrets=False)
 
 
 def test_parse_accounts_can_load_account_secrets_from_env(monkeypatch):
@@ -48,10 +45,7 @@ def test_parse_accounts_can_load_account_secrets_from_env(monkeypatch):
     monkeypatch.setenv("ALICE_API_HASH", "hash")
     monkeypatch.setenv("ALICE_SESSION_STRING", "session")
 
-    accounts = parse_accounts(
-        {"accounts": [{"name": "alice", "env_prefix": "ALICE", "groups": []}]},
-        load_settings_from_env(),
-    )
+    accounts = parse_accounts({"accounts": [{"name": "alice", "env_prefix": "ALICE", "groups": []}]})
 
     assert len(accounts) == 1
     assert accounts[0].name == "alice"

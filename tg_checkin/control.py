@@ -43,11 +43,13 @@ class ControlService:
     def __init__(
         self,
         *,
+        account_name: str,
         load_config: Callable[[], dict[str, Any]],
         save_config: Callable[[dict[str, Any]], None],
         reload_scheduler: Callable[[], Awaitable[None]],
         send_job: Callable[[Any], Awaitable[None]],
     ) -> None:
+        self.account_name = account_name
         self._load_config = load_config
         self._save_config = save_config
         self._reload_scheduler = reload_scheduler
@@ -130,7 +132,7 @@ class ControlService:
                 "cron": "" if cron == DEFAULT_CRON and is_default_alias(cron_raw) else cron,
                 "run_on_start": False,
             }
-            parsed_job = parse_jobs({"groups": [job]})[0]
+            parsed_job = parse_jobs(self._jobs_config(config, [job]))[0]
             cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
             groups.append(job)
             await self._persist(config)
@@ -148,7 +150,7 @@ class ControlService:
             group = ensure_task_group(groups, ctx.chat_id, ctx.chat_name)
             tasks = ensure_tasks_list(group)
             task = build_task(unique_task_name(task_name, tasks), cron_raw, message)
-            parsed_job = parse_jobs({"groups": [task_group_for_validation(group, task)]})[0]
+            parsed_job = parse_jobs(self._jobs_config(config, [task_group_for_validation(group, task)]))[0]
             cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
             tasks.append(task)
             await self._persist(config)
@@ -178,7 +180,7 @@ class ControlService:
             "cron": "" if cron == DEFAULT_CRON and is_default_alias(cron_raw) else cron,
             "run_on_start": False,
         }
-        parsed_job = parse_jobs({"groups": [job]})[0]
+        parsed_job = parse_jobs(self._jobs_config(config, [job]))[0]
         cron_trigger(parsed_job.cron, str(config.get("timezone") or "Asia/Shanghai"))
         groups.append(job)
         await self._persist(config)
@@ -231,8 +233,9 @@ class ControlService:
             return "用法：/test [name]"
         target = resolve_target(groups, ctx.chat_id, args[0] if args else None)
         target_name = target_job_name(groups, target)
-        jobs = parse_jobs(config)
-        job = next((j for j in jobs if j.name == target_name), None)
+        jobs = parse_jobs(self._jobs_config(config, groups))
+        qualified_target_name = self._qualified_job_name(target_name)
+        job = next((j for j in jobs if j.name == qualified_target_name), None)
         if not job:
             raise ValueError(f"任务不存在：{target_name}")
         await self._send_job(job)
@@ -241,6 +244,27 @@ class ControlService:
     async def _persist(self, config: dict[str, Any]) -> None:
         self._save_config(config)
         await self._reload_scheduler()
+
+    def _jobs_config(self, config: dict[str, Any], groups: list[dict[str, Any]]) -> dict[str, Any]:
+        wrapped = {
+            key: value
+            for key, value in config.items()
+            if key
+            in {
+                "timezone",
+                "default_delay_seconds",
+                "default_cron",
+                "default_stagger_seconds",
+                "default_stagger_mode",
+            }
+        }
+        wrapped["accounts"] = [{"name": self.account_name, "groups": groups}]
+        return wrapped
+
+    def _qualified_job_name(self, local_name: str) -> str:
+        if local_name.startswith(f"{self.account_name}/"):
+            return local_name
+        return f"{self.account_name}/{local_name}"
 
 
 def help_text() -> str:
@@ -448,8 +472,3 @@ def set_field(groups: list[dict[str, Any]], target: ResolvedTarget, field: str, 
     else:
         raise ValueError("字段只支持：cron、message、chat_id")
     return target_job_name(groups, target)
-
-
-# Backward-compatible helper retained for old tests/imports.
-def resolve_index(groups: list[dict[str, Any]], chat_id: int, optional_name: str | None) -> int:
-    return resolve_target(groups, chat_id, optional_name).group_index

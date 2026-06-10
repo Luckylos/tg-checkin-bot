@@ -1,161 +1,126 @@
-# 账号级 env 示例（写在 .env，不要写进 config.yml）：
-# ALICE_API_ID=123456
-# ALICE_API_HASH=...
-# ALICE_SESSION_STRING=...
-# BOB_API_ID=123456
-# BOB_API_HASH=...
-# BOB_SESSION_STRING=...
-#
-# config.yml 中的多账号结构示例：
-# accounts:
-#   - name: alice
-#     enabled: true
-#     env_prefix: ALICE
-#     groups:
-#       - name: alice每日签到
-#         chat_id: some_bot
-#         tasks:
-#           - name: morning
-#             cron: "0 10 9 * * *"
-#             message: /checkin
-#           - name: night
-#             cron: "0 10 21 * * *"
-#             message: "签到"
-#   - name: bob
-#     enabled: true
-#     env_prefix: BOB
-#     groups:
-#       - name: bob每日签到
-#         chat_id: another_bot
-#         message: /checkin
-#         cron: ""
-#
-# 说明：
-# - 实际 job 名会展开为 account/group/task，例如 alice/alice每日签到/morning。
-# - 同一账号同一 chat_id 的任务会串行执行，避免菜单 flow 上下文串线。
-# - 不同账号可以并行执行；某个账号 session 失效不会改变其他账号配置。
-# - 旧版单账号 groups: 结构仍兼容，继续读取 .env 中的 TG_API_ID/TG_API_HASH/TG_SESSION_STRING。
-#
-# 使用方法：
-#   cp config.example.yml config/config.yml
-#   chmod 600 config/config.yml
-#   编辑 config/config.yml 后运行：
-#   docker compose run --rm --no-deps tg-checkin python /app/app.py validate /config/config.yml
-#
-# 说明：
-# - 群组推荐使用 -100... 数字 chat_id。
-# - bot/用户私聊可使用 username，例如 freexzteam_bot 或 @freexzteam_bot。
-# - 普通每日签到用 message。
-# - 需要按菜单一步步走的 bot 用 flow。
-# - 多账号时使用 accounts:，每个账号有独立 groups/tasks；凭据建议放 .env 并用 *_env 引用。
-
 timezone: Asia/Shanghai
 
 default_delay_seconds: 3
-# cron 留空时使用该默认值；6 字段含义：秒 分 时 日 月 星期。
+# 6 字段 cron：秒 分 时 日 月 星期；任务 cron 留空时使用该默认值。
 default_cron: "0 10 0 * * *"
-# 默认 cron 任务会稳定错峰 0~1800 秒，避免多个任务同秒发送。
+# 使用默认 cron 的任务会稳定错峰，避免多个任务同秒发送。
 default_stagger_seconds: 1800
 default_stagger_mode: stable
 
-groups:
-  # 示例 1：普通单任务签到。
-  - name: HyVPS 示例
+# 所有配置都从 accounts 开始；即使只有一个账号，也写成一个 account。
+# 凭据不写入本文件，放在 .env：MAIN_API_ID / MAIN_API_HASH / MAIN_SESSION_STRING。
+accounts:
+  - name: main
     enabled: true
-    chat_id: -1003849837200
-    message: /checkin@HyVPS_Bot
-    parse_bot_command: true
-    cron: "" # 留空 = default_cron，每天 00:10:00
-    run_on_start: false
-
-  # 示例 2：同一目标多个时间段。
-  - name: 同群多时间段示例
-    enabled: false
-    chat_id: -1001234567890
-    parse_bot_command: true
-    tasks:
-      - name: morning
-        cron: "0 10 9 * * *"
-        message: /checkin@SomeBot
-      - name: night
-        cron: "0 10 21 * * *"
-        message: /sign@OtherBot
-      - name: text-message
-        cron: "0 0 23 * * *"
-        message: "签到"
-        parse_bot_command: false
-    stagger_seconds: 1800
-
-  # 示例 3：按钮式 bot 状态机。
-  # 普通签到 message 和兑换 flow 可以共存；不要删除每日签到任务。
-  - name: 按钮状态机示例
-    enabled: false
-    chat_id: example_bot
-    parse_bot_command: true
-    tasks:
-      - name: 每日签到
+    env_prefix: MAIN
+    groups:
+      # 示例 1：普通单任务签到。
+      - name: HyVPS 示例
+        enabled: true
+        chat_id: -1003849837200
+        message: /checkin@HyVPS_Bot
+        parse_bot_command: true
         cron: ""
-        message: "📅 每日签到"
         run_on_start: false
 
-      - name: plus兑换
-        cron: "0 0 0 * * *"
-        run_on_start: false
-        flow:
-          mode: auto
-          repeat:
-            count: 50 # 最大尝试轮数；成功或命中 abort_on_text 会提前停止
-            interval_seconds: 3
-            jitter_seconds: 1
-            stop_on_success: true
-            max_runtime_seconds: 300
-          rules:
-            abort_on_text:
-              - "今日 Plus 成品号上限已满，明天再来"
-              - "今日兑换上限已满"
-              - "明天再来"
-            success_on_text:
-              - "兑换成功"
-              - "领取成功"
-              - "已为你生成"
-            retry_on_text:
-              - "库存不足"
-              - "请稍后再试"
-              - "当前繁忙"
-              - "排队中"
-            unknown_policy: retry
-            max_unknown_replies: 3
-          steps:
-            - action: send
-              text: "/start"
-              expect_any:
-                text:
-                  - "积分商城"
-                buttons:
-                  - "积分商城"
-              timeout_seconds: 20
-            - action: click
-              button: "🛍️ 积分商城"
-              expect_any:
-                text:
-                  - "Plus 成品号"
-                buttons:
-                  - "Plus 成品号"
-              timeout_seconds: 20
-            - action: click
-              button: "成品号"
-              expect_any:
-                text:
-                  - "确认兑换"
+      # 示例 2：同一目标多个时间段发送不同内容。
+      - name: 同群多时间段示例
+        enabled: false
+        chat_id: -1001234567890
+        parse_bot_command: true
+        tasks:
+          - name: morning
+            cron: "0 10 9 * * *"
+            message: /checkin@SomeBot
+          - name: night
+            cron: "0 10 21 * * *"
+            message: /sign@OtherBot
+          - name: text-message
+            cron: "0 0 23 * * *"
+            message: "签到"
+            parse_bot_command: false
+
+      # 示例 3：按钮式 bot 状态机。
+      # click 会先在上一步 bot 回复的按钮文本中做子串匹配，再发送完整按钮文本。
+      # 真实兑换/消费类 flow 不要在未确认前手动 /test 最后一确认步骤。
+      - name: 按钮状态机示例
+        enabled: false
+        chat_id: freexzteam_bot
+        parse_bot_command: true
+        tasks:
+          - name: 每日签到
+            cron: ""
+            message: "📅 每日签到"
+            run_on_start: false
+
+          - name: plus兑换
+            cron: "0 0 0 * * *"
+            run_on_start: false
+            flow:
+              mode: auto
+              repeat:
+                count: 50
+                interval_seconds: 3
+                jitter_seconds: 1
+                stop_on_success: true
+                max_runtime_seconds: 300
+              rules:
+                abort_on_text:
                   - "今日 Plus 成品号上限已满，明天再来"
-                buttons:
-                  - "确认兑换"
-              timeout_seconds: 20
-            - action: click
-              button: "✅ 确认兑换"
-              expect_any:
-                text:
+                  - "今日兑换上限已满"
+                  - "明天再来"
+                success_on_text:
                   - "兑换成功"
-                  - "今日 Plus 成品号上限已满，明天再来"
+                  - "领取成功"
+                  - "已为你生成"
+                retry_on_text:
                   - "库存不足"
-              timeout_seconds: 25
+                  - "请稍后再试"
+                  - "当前繁忙"
+                  - "排队中"
+                unknown_policy: retry
+                max_unknown_replies: 3
+              steps:
+                - action: send
+                  text: "/start"
+                  expect_any:
+                    text:
+                      - "积分商城"
+                    buttons:
+                      - "积分商城"
+                  timeout_seconds: 20
+                - action: click
+                  button: "积分商城"
+                  expect_any:
+                    text:
+                      - "Plus 成品号"
+                    buttons:
+                      - "Plus 成品号"
+                  timeout_seconds: 20
+                - action: click
+                  button: "成品号"
+                  expect_any:
+                    text:
+                      - "确认兑换"
+                      - "今日 Plus 成品号上限已满，明天再来"
+                    buttons:
+                      - "确认兑换"
+                  timeout_seconds: 20
+                - action: click
+                  button: "✅ 确认兑换"
+                  expect_any:
+                    text:
+                      - "兑换成功"
+                      - "今日 Plus 成品号上限已满，明天再来"
+                      - "库存不足"
+                  timeout_seconds: 25
+
+  # 多账号示例：启用前在 .env 填入 SECOND_* 凭据。
+  - name: second
+    enabled: false
+    env_prefix: SECOND
+    groups:
+      - name: 第二账号签到示例
+        chat_id: another_bot
+        message: /checkin
+        cron: "0 30 8 * * *"

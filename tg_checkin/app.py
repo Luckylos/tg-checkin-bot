@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +12,7 @@ from telethon import events
 from .config import load_config, parse_accounts, parse_jobs, save_config
 from .control import CONTROL_COMMANDS, ControlContext, ControlService, parse_control_command
 from .flow import BotFlowRunner
-from .models import DEFAULT_ACCOUNT_NAME, AccountSettings, AppSettings, JobConfig
+from .models import AccountSettings, AppSettings, JobConfig
 from .scheduler import cron_trigger, maybe_stagger_job
 from .telegram import command_entities, create_client, resolve_send_entity
 
@@ -27,6 +26,7 @@ class AccountRuntime:
         self.flow_runner = BotFlowRunner(self.client, logger=self.logger)
         self._chat_locks: dict[str, asyncio.Lock] = {}
         self.control = ControlService(
+            account_name=account.name,
             load_config=self.load_account_config,
             save_config=self.save_account_config,
             reload_scheduler=self.app.force_reload_after_write,
@@ -64,8 +64,7 @@ class AccountRuntime:
                 await asyncio.sleep(job.delay_seconds)
 
     async def send_control_job(self, job: JobConfig) -> None:
-        account_job = replace(job, account_name=self.account.name)
-        await self.send_job(account_job)
+        await self.send_job(job)
 
     async def send_single_message_job(self, job: JobConfig, entity: Any) -> None:
         entities = command_entities(job.message, job.parse_bot_command)
@@ -138,14 +137,10 @@ class CheckinApp:
 
     async def start_clients(self) -> None:
         config = load_config(self.settings.config_path)
-        accounts = parse_accounts(config, self.settings)
+        accounts = parse_accounts(config)
         self.runtimes = {account.name: AccountRuntime(self, account) for account in accounts}
         for runtime in self.runtimes.values():
             await runtime.start_client()
-
-    # Backward-compatible name retained for old code/tests.
-    async def start_client(self) -> None:
-        await self.start_clients()
 
     async def send_job(self, job: JobConfig, *, apply_stagger: bool = False) -> None:
         runtime = self.runtimes.get(job.account_name)
@@ -214,29 +209,26 @@ class CheckinApp:
                 pass
 
     def extract_account_config(self, full: dict[str, Any], account_name: str) -> dict[str, Any]:
-        if "accounts" not in full or account_name == DEFAULT_ACCOUNT_NAME:
-            return {key: value for key, value in full.items() if key != "accounts"}
         accounts = full.get("accounts")
         if not isinstance(accounts, list):
             raise ValueError("config accounts must be a list")
         for account in accounts:
             if isinstance(account, dict) and str(account.get("name")) == account_name:
-                return self._account_subconfig(full, account)
+                sub = self._account_subconfig(full, account)
+                sub["groups"] = account.get("groups", [])
+                return sub
         raise ValueError(f"account not found: {account_name}")
 
     def replace_account_config(self, full: dict[str, Any], account_name: str, account_config: dict[str, Any]) -> dict[str, Any]:
-        if "accounts" not in full or account_name == DEFAULT_ACCOUNT_NAME:
-            full["groups"] = account_config.get("groups", [])
-            for field in ("timezone", "default_delay_seconds", "default_cron", "default_stagger_seconds", "default_stagger_mode"):
-                if field in account_config:
-                    full[field] = account_config[field]
-            return full
         accounts = full.get("accounts")
         if not isinstance(accounts, list):
             raise ValueError("config accounts must be a list")
         for account in accounts:
             if isinstance(account, dict) and str(account.get("name")) == account_name:
-                account["groups"] = account_config.get("groups", [])
+                groups = account_config.get("groups", [])
+                if not isinstance(groups, list):
+                    raise ValueError("groups must be a list")
+                account["groups"] = groups
                 return full
         raise ValueError(f"account not found: {account_name}")
 

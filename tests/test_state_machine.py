@@ -5,10 +5,14 @@ from tg_checkin.flow import render_reply_text
 from tg_checkin.flow_config import parse_flow
 
 
+def cfg(groups):
+    return {"accounts": [{"name": "main", "groups": groups}]}
+
+
 def test_parse_jobs_supports_state_machine_flow_steps():
     jobs = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "公益Plus/Team机器人",
                     "chat_id": "freexzteam_bot",
@@ -16,45 +20,43 @@ def test_parse_jobs_supports_state_machine_flow_steps():
                         {
                             "name": "PP_PLUS_FLOW",
                             "cron": "0 0 0 * * *",
-                            "flow": [
-                                {"send": "/start", "expect": "积分商城"},
-                                {"send": "🛍️ 积分商城", "expect": "Plus 成品号"},
-                                {"send": "💎 Plus 成品号(PP渠道) · 3积分", "expect": "确认兑换"},
-                                {"send": "✅ 确认兑换", "expect_any": ["兑换", "上限", "积分不足"]},
-                            ],
+                            "flow": {
+                                "steps": [
+                                    {"action": "send", "text": "/start", "expect_any": ["积分商城"]},
+                                    {"action": "click", "button": "积分商城", "expect_any": ["Plus 成品号"]},
+                                    {"action": "click", "button": "成品号", "expect_any": ["确认兑换"]},
+                                    {"action": "click", "button": "✅ 确认兑换", "expect_any": ["兑换", "上限", "积分不足"]},
+                                ]
+                            },
                         }
                     ],
                 }
             ]
-        }
+        )
     )
 
     assert len(jobs) == 1
     job = jobs[0]
+    assert job.name == "main/公益Plus/Team机器人/PP_PLUS_FLOW"
     assert job.message == ""
-    assert [step.send for step in job.flow] == [
-        "/start",
-        "🛍️ 积分商城",
-        "💎 Plus 成品号(PP渠道) · 3积分",
-        "✅ 确认兑换",
-    ]
+    assert [step.send for step in job.flow] == ["/start", "积分商城", "成品号", "✅ 确认兑换"]
     assert job.flow[0].expect_any == ("积分商城",)
     assert job.flow[-1].expect_any == ("兑换", "上限", "积分不足")
 
 
 def test_parse_jobs_requires_message_or_flow():
     with pytest.raises(ValueError, match="missing message or flow"):
-        parse_jobs({"groups": [{"name": "bad", "chat_id": "freexzteam_bot", "tasks": [{"name": "x"}]}]})
+        parse_jobs(cfg([{"name": "bad", "chat_id": "freexzteam_bot", "tasks": [{"name": "x"}]}]))
 
 
 def test_parse_flow_validates_required_fields_and_bounds():
-    assert parse_flow([{"send": "hello", "expect_any": "ok", "timeout": 1}])[0].expect_any == ("ok",)
-    with pytest.raises(ValueError, match="missing send"):
-        parse_flow([{"expect": "no-send"}])
+    assert parse_flow({"steps": [{"action": "send", "text": "hello", "expect_any": "ok", "timeout": 1}]}).steps[0].expect_any == ("ok",)
+    with pytest.raises(ValueError, match="send step requires text"):
+        parse_flow({"steps": [{"action": "send", "expect_any": "no-send"}]})
     with pytest.raises(ValueError, match="timeout_seconds must be > 0"):
-        parse_flow([{"send": "hello", "timeout_seconds": 0}])
-    with pytest.raises(ValueError, match="expect_any must be string or list"):
-        parse_flow([{"send": "hello", "expect_any": {"bad": True}}])
+        parse_flow({"steps": [{"action": "send", "text": "hello", "timeout_seconds": 0}]})
+    with pytest.raises(ValueError, match="expect_any.bad must be string or list"):
+        parse_flow({"steps": [{"action": "send", "text": "hello", "expect_any": {"bad": True}}]})
 
 
 def test_render_reply_text_includes_button_labels():
@@ -75,21 +77,21 @@ def test_render_reply_text_includes_button_labels():
 
 def test_flow_task_does_not_remove_regular_signin_task():
     jobs = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "公益Plus/Team机器人",
                     "chat_id": "freexzteam_bot",
                     "tasks": [
                         {"name": "签到", "cron": "", "message": "📅 每日签到"},
-                        {"name": "兑换", "cron": "0 0 0 * * *", "flow": [{"send": "/start", "expect": "积分商城"}]},
+                        {"name": "兑换", "cron": "0 0 0 * * *", "flow": {"steps": [{"action": "send", "text": "/start", "expect_any": ["积分商城"]}]}},
                     ],
                 }
             ]
-        }
+        )
     )
 
-    assert [job.name for job in jobs] == ["公益Plus/Team机器人/签到", "公益Plus/Team机器人/兑换"]
+    assert [job.name for job in jobs] == ["main/公益Plus/Team机器人/签到", "main/公益Plus/Team机器人/兑换"]
     assert jobs[0].message == "📅 每日签到"
     assert jobs[0].flow == ()
     assert jobs[1].message == ""

@@ -178,7 +178,7 @@ class BotFlowRunner:
 
         if job.flow.rules.has_explicit_rules:
             return FlowResult(job.name, tuple(results), status="STOPPED_UNKNOWN_REPLY", round=round_no, reason="no_rule_matched")
-        return FlowResult(job.name, tuple(results), status="DONE_SUCCESS", round=round_no, reason="legacy_steps_completed")
+        return FlowResult(job.name, tuple(results), status="DONE_SUCCESS", round=round_no, reason="steps_completed")
 
     async def _run_step(
         self,

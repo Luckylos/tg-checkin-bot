@@ -6,7 +6,6 @@ from typing import Any, Iterator, Literal
 DEFAULT_CRON = "0 10 0 * * *"  # daily 00:10:00
 DEFAULT_STAGGER_SECONDS = 1800
 STAGGER_MODES = {"stable", "random", "off"}
-DEFAULT_ACCOUNT_NAME = "default"
 
 FlowAction = Literal["send", "click", "wait"]
 UnknownPolicy = Literal["retry", "abort"]
@@ -46,7 +45,6 @@ class FlowStep:
 
     @property
     def send(self) -> str:
-        """Backward-compatible text sent for ReplyKeyboard-style bots."""
         if self.action == "click":
             return self.button
         return self.text
@@ -58,7 +56,6 @@ class FlowSpec:
     repeat: RepeatPolicy = field(default_factory=RepeatPolicy)
     rules: MatchRules = field(default_factory=MatchRules)
     mode: str = "auto"
-    legacy: bool = False
 
     def __bool__(self) -> bool:
         return bool(self.steps)
@@ -81,6 +78,7 @@ class FlowSpec:
 @dataclass(frozen=True)
 class JobConfig:
     name: str
+    account_name: str
     enabled: bool
     chat_id: int | str
     task_type: str
@@ -92,14 +90,10 @@ class JobConfig:
     stagger_seconds: int
     stagger_mode: str
     flow: FlowSpec = field(default_factory=FlowSpec)
-    account_name: str = DEFAULT_ACCOUNT_NAME
 
 
 @dataclass(frozen=True)
 class AppSettings:
-    api_id: int | None = None
-    api_hash: str | None = None
-    session_string: str | None = None
     config_path: str = "/config/config.yml"
     reload_seconds: int = 60
     control_enabled: bool = True
@@ -116,7 +110,7 @@ class AccountSettings:
 
 def normalize_chat_id(value: Any) -> int | str:
     if isinstance(value, bool):
-        raise ValueError("chat_id must be an integer")
+        raise ValueError("chat_id must be an integer or Telegram username")
     if isinstance(value, int):
         return value
     raw = str(value).strip()

@@ -8,19 +8,9 @@ from .models import FlowSpec, FlowStep, MatchRules, RepeatPolicy
 def parse_flow(raw: Any, *, label: str = "flow") -> FlowSpec:
     if raw in (None, ""):
         return FlowSpec()
-    if isinstance(raw, list):
-        if not raw:
-            raise ValueError(f"{label} must be a non-empty list")
-        return FlowSpec(
-            steps=tuple(_parse_legacy_flow_step(item, label=f"{label}[{idx}]") for idx, item in enumerate(raw, start=1)),
-            repeat=RepeatPolicy(count=1),
-            rules=MatchRules(),
-            mode="auto",
-            legacy=True,
-        )
     if isinstance(raw, dict):
         return _parse_structured_flow(raw, label=label)
-    raise ValueError(f"{label} must be a non-empty list or mapping")
+    raise ValueError(f"{label} must be a mapping")
 
 
 def _parse_structured_flow(raw: dict[str, Any], *, label: str) -> FlowSpec:
@@ -35,7 +25,6 @@ def _parse_structured_flow(raw: dict[str, Any], *, label: str) -> FlowSpec:
         repeat=_parse_repeat(raw.get("repeat") or {}, label=f"{label}.repeat"),
         rules=_parse_rules(raw.get("rules") or {}, label=f"{label}.rules"),
         mode=mode,
-        legacy=False,
     )
 
 
@@ -117,21 +106,6 @@ def _parse_structured_step(item: Any, *, label: str) -> FlowStep:
     )
 
 
-def _parse_legacy_flow_step(item: Any, *, label: str) -> FlowStep:
-    if not isinstance(item, dict):
-        raise ValueError(f"{label} must be a mapping")
-    send = str(item.get("send") or "")
-    if not send:
-        raise ValueError(f"{label}: missing send")
-    timeout_seconds = float(item.get("timeout_seconds", item.get("timeout", 20)))
-    delay_seconds = float(item.get("delay_seconds", item.get("delay", 0)))
-    if timeout_seconds <= 0:
-        raise ValueError(f"{label}: timeout_seconds must be > 0")
-    if delay_seconds < 0:
-        raise ValueError(f"{label}: delay_seconds must be >= 0")
-    return FlowStep(action="send", text=send, expect_any=_parse_expectations(item, label=label), timeout_seconds=timeout_seconds, delay_seconds=delay_seconds)
-
-
 def _parse_expectations(item: dict[str, Any], *, label: str) -> tuple[str, ...]:
     expects: list[str] = []
     if item.get("expect") not in (None, ""):
@@ -145,6 +119,10 @@ def _parse_expectations(item: dict[str, Any], *, label: str) -> tuple[str, ...]:
         elif isinstance(raw_any, dict):
             if not bool(item.get("_allow_expect_mapping", False)):
                 raise ValueError(f"{label}: expect_any must be string or list")
+            allowed_keys = {"text", "buttons"}
+            unknown_keys = sorted(set(raw_any) - allowed_keys)
+            if unknown_keys:
+                raise ValueError(f"{label}.expect_any.{unknown_keys[0]} must be string or list")
             for key in ("text", "buttons"):
                 expects.extend(_parse_text_list(raw_any.get(key), label=f"{label}.expect_any.{key}"))
         else:

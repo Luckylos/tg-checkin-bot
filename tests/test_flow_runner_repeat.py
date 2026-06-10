@@ -6,6 +6,10 @@ from tg_checkin.flow import BotFlowRunner, classify_reply
 ABORT_TEXT = "今日 Plus 成品号上限已满，明天再来"
 
 
+def cfg(groups):
+    return {"accounts": [{"name": "main", "groups": groups}]}
+
+
 class FakeMessage:
     def __init__(self, message_id: int, text: str, *, out: bool = False, buttons=None):
         self.id = message_id
@@ -49,8 +53,8 @@ class FakeTelegramClient:
 
 async def test_flow_count_stops_early_on_abort_text_and_does_not_run_next_round():
     job = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "PlusBot",
                     "chat_id": "freexzteam_bot",
@@ -69,7 +73,7 @@ async def test_flow_count_stops_early_on_abort_text_and_does_not_run_next_round(
                     ],
                 }
             ]
-        }
+        )
     )[0]
     client = FakeTelegramClient(["库存不足", "请稍后再试", ABORT_TEXT])
 
@@ -87,8 +91,8 @@ async def test_click_step_resolves_button_by_substring_before_sending_full_label
             self.text = text
 
     job = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "PlusBot",
                     "chat_id": "freexzteam_bot",
@@ -101,7 +105,7 @@ async def test_click_step_resolves_button_by_substring_before_sending_full_label
                     },
                 }
             ]
-        }
+        )
     )[0]
     client = FakeTelegramClient(
         [
@@ -118,8 +122,8 @@ async def test_click_step_resolves_button_by_substring_before_sending_full_label
 
 async def test_flow_count_reaches_limit_when_every_round_is_retry():
     job = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "PlusBot",
                     "chat_id": "freexzteam_bot",
@@ -130,7 +134,7 @@ async def test_flow_count_reaches_limit_when_every_round_is_retry():
                     },
                 }
             ]
-        }
+        )
     )[0]
     client = FakeTelegramClient(["库存不足", "库存不足", "库存不足"])
 
@@ -143,8 +147,8 @@ async def test_flow_count_reaches_limit_when_every_round_is_retry():
 
 def test_reply_classifier_prioritizes_abort_over_success_and_retry():
     rules = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "PlusBot",
                     "chat_id": "freexzteam_bot",
@@ -159,7 +163,7 @@ def test_reply_classifier_prioritizes_abort_over_success_and_retry():
                     },
                 }
             ]
-        }
+        )
     )[0].flow.rules
 
     result = classify_reply(f"兑换成功，但{ABORT_TEXT}，库存不足", rules)
@@ -170,35 +174,15 @@ def test_reply_classifier_prioritizes_abort_over_success_and_retry():
 
 def test_structured_flow_config_validation_rejects_bad_repeat_and_step_shape():
     with pytest.raises(ValueError, match="repeat.count must be > 0"):
-        parse_jobs(
-            {
-                "groups": [
-                    {
-                        "name": "bad",
-                        "chat_id": "freexzteam_bot",
-                        "flow": {"repeat": {"count": 0}, "steps": [{"action": "send", "text": "/start"}]},
-                    }
-                ]
-            }
-        )
+        parse_jobs(cfg([{"name": "bad", "chat_id": "freexzteam_bot", "flow": {"repeat": {"count": 0}, "steps": [{"action": "send", "text": "/start"}]}}]))
 
     with pytest.raises(ValueError, match="click step requires button"):
-        parse_jobs(
-            {
-                "groups": [
-                    {
-                        "name": "bad",
-                        "chat_id": "freexzteam_bot",
-                        "flow": {"repeat": {"count": 1}, "steps": [{"action": "click"}]},
-                    }
-                ]
-            }
-        )
+        parse_jobs(cfg([{"name": "bad", "chat_id": "freexzteam_bot", "flow": {"repeat": {"count": 1}, "steps": [{"action": "click"}]}}]))
 
     with pytest.raises(ValueError, match="unknown_policy must be retry or abort"):
         parse_jobs(
-            {
-                "groups": [
+            cfg(
+                [
                     {
                         "name": "bad",
                         "chat_id": "freexzteam_bot",
@@ -209,26 +193,5 @@ def test_structured_flow_config_validation_rejects_bad_repeat_and_step_shape():
                         },
                     }
                 ]
-            }
+            )
         )
-
-
-async def test_legacy_list_flow_remains_one_round_compatible():
-    job = parse_jobs(
-        {
-            "groups": [
-                {
-                    "name": "legacy",
-                    "chat_id": "freexzteam_bot",
-                    "flow": [{"send": "/start", "expect": "积分商城"}],
-                }
-            ]
-        }
-    )[0]
-    client = FakeTelegramClient(["欢迎\n积分商城"])
-
-    result = await BotFlowRunner(client).run(job, object())
-
-    assert result.status == "DONE_SUCCESS"
-    assert result.round == 1
-    assert client.sent == ["/start"]

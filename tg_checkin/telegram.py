@@ -54,7 +54,7 @@ def create_client(session_string: str, api_id: int, api_hash: str) -> TelegramCl
         if len(raw) == struct.calcsize(">BI?256sQ?"):
             dc_id, embedded_api_id, test_mode, auth_key, _user_id, _is_bot = struct.unpack(">BI?256sQ?", raw)
             if embedded_api_id != api_id:
-                raise ValueError("TG_SESSION_STRING api_id does not match TG_API_ID")
+                raise ValueError("session_string api_id does not match configured api_id")
             session = MemorySession()
             session.set_dc(dc_id, dc_server_address(dc_id, test_mode), 443)
             session.auth_key = AuthKey(auth_key)

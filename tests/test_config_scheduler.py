@@ -8,22 +8,32 @@ from tg_checkin.scheduler import cron_trigger, stable_stagger_offset
 from tg_checkin.telegram import command_entities
 
 
+def cfg(groups, **extra):
+    return {**extra, "accounts": [{"name": "main", "groups": groups}]}
+
+
 def test_parse_jobs_defaults_and_stagger_behavior():
-    cfg = {
-        "default_cron": DEFAULT_CRON,
-        "default_delay_seconds": 7,
-        "default_stagger_seconds": 1800,
-        "default_stagger_mode": "stable",
-        "groups": [
-            {"name": "default-empty", "chat_id": "-1001", "message": "/checkin@Bot", "cron": ""},
-            {"name": "explicit-default", "chat_id": -1002, "message": "签到", "cron": DEFAULT_CRON},
-            {"name": "custom", "chat_id": -1003, "message": "hello", "cron": "0 5 9 * * *"},
-            {"name": "off", "chat_id": -1004, "message": "hello", "cron": "", "stagger_mode": "off"},
-        ],
-    }
+    jobs = parse_jobs(
+        cfg(
+            [
+                {"name": "default-empty", "chat_id": "-1001", "message": "/checkin@Bot", "cron": ""},
+                {"name": "explicit-default", "chat_id": -1002, "message": "签到", "cron": DEFAULT_CRON},
+                {"name": "custom", "chat_id": -1003, "message": "hello", "cron": "0 5 9 * * *"},
+                {"name": "off", "chat_id": -1004, "message": "hello", "cron": "", "stagger_mode": "off"},
+            ],
+            default_cron=DEFAULT_CRON,
+            default_delay_seconds=7,
+            default_stagger_seconds=1800,
+            default_stagger_mode="stable",
+        )
+    )
 
-    jobs = parse_jobs(cfg)
-
+    assert [job.name for job in jobs] == [
+        "main/default-empty",
+        "main/explicit-default",
+        "main/custom",
+        "main/off",
+    ]
     assert jobs[0].cron == DEFAULT_CRON
     assert jobs[0].delay_seconds == 7
     assert jobs[0].stagger_seconds == 1800
@@ -34,9 +44,8 @@ def test_parse_jobs_defaults_and_stagger_behavior():
 
 def test_parse_jobs_supports_group_tasks_for_different_messages_at_different_times():
     jobs = parse_jobs(
-        {
-            "default_delay_seconds": 5,
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "HyVPS",
                     "enabled": True,
@@ -48,10 +57,11 @@ def test_parse_jobs_supports_group_tasks_for_different_messages_at_different_tim
                     ],
                 }
             ],
-        }
+            default_delay_seconds=5,
+        )
     )
 
-    assert [job.name for job in jobs] == ["HyVPS/morning", "HyVPS/night"]
+    assert [job.name for job in jobs] == ["main/HyVPS/morning", "main/HyVPS/night"]
     assert {job.chat_id for job in jobs} == {-1003849837200}
     assert [job.cron for job in jobs] == ["0 10 9 * * *", "0 10 21 * * *"]
     assert [job.message for job in jobs] == ["/checkin@HyVPS_Bot", "/sign@OtherBot"]
@@ -62,8 +72,8 @@ def test_parse_jobs_supports_group_tasks_for_different_messages_at_different_tim
 
 def test_parse_jobs_allows_group_message_as_task_default():
     jobs = parse_jobs(
-        {
-            "groups": [
+        cfg(
+            [
                 {
                     "name": "HyVPS",
                     "chat_id": -1001,
@@ -74,29 +84,37 @@ def test_parse_jobs_allows_group_message_as_task_default():
                     ],
                 }
             ]
-        }
+        )
     )
 
     assert [job.message for job in jobs] == ["/default@Bot", "签到"]
 
 
-def test_parse_jobs_rejects_duplicate_job_names():
+def test_parse_jobs_rejects_duplicate_account_and_job_names():
+    with pytest.raises(ValueError, match="duplicate account name"):
+        parse_jobs({"accounts": [{"name": "same", "groups": []}, {"name": "same", "groups": []}]})
+
     with pytest.raises(ValueError, match="duplicate job name"):
         parse_jobs(
-            {
-                "groups": [
-                    {"name": "HyVPS", "chat_id": -1001, "message": "签到", "tasks": [{"name": "morning"}, {"name": "morning"}]}
+            cfg(
+                [
+                    {
+                        "name": "HyVPS",
+                        "chat_id": -1001,
+                        "message": "签到",
+                        "tasks": [{"name": "morning"}, {"name": "morning"}],
+                    }
                 ]
-            }
+            )
         )
 
 
 def test_stable_stagger_offset_is_deterministic_and_bounded():
     job = parse_jobs(
-        {
-            "default_stagger_seconds": 1800,
-            "groups": [{"name": "HyVPS", "chat_id": -1001, "message": "/checkin@Bot", "cron": ""}],
-        }
+        cfg(
+            [{"name": "HyVPS", "chat_id": -1001, "message": "/checkin@Bot", "cron": ""}],
+            default_stagger_seconds=1800,
+        )
     )[0]
 
     first = stable_stagger_offset(job)
@@ -144,8 +162,9 @@ def test_parse_control_command_strips_bot_suffix():
 
 def test_load_and_save_config_atomic(tmp_path):
     path = tmp_path / "config.yml"
-    save_config(str(path), {"timezone": "Asia/Shanghai", "groups": []})
+    data = {"timezone": "Asia/Shanghai", "accounts": [{"name": "main", "groups": []}]}
+    save_config(str(path), data)
 
-    assert load_config(str(path)) == {"timezone": "Asia/Shanghai", "groups": []}
+    assert load_config(str(path)) == data
     assert not (tmp_path / ".config.yml.tmp").exists()
     assert path.stat().st_mode & 0o777 == 0o600

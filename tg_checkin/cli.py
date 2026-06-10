@@ -19,7 +19,7 @@ def setup_logging() -> None:
 
 
 async def auth() -> None:
-    raise SystemExit("auth command is disabled. Generate a Telethon StringSession locally and set TG_SESSION_STRING in .env")
+    raise SystemExit("auth command is disabled. Generate a Telethon StringSession locally and set <PREFIX>_SESSION_STRING in .env")
 
 
 async def validate() -> None:
@@ -28,8 +28,7 @@ async def validate() -> None:
     if len(sys.argv) >= 3:
         config_path = sys.argv[2]
     config = load_config(config_path)
-    settings = load_settings_from_env()
-    accounts = parse_accounts(config, settings, require_secrets=False)
+    accounts = parse_accounts(config, require_secrets=False)
     timezone = str(config.get("timezone") or "Asia/Shanghai")
     jobs = parse_jobs(config)
     for job in jobs:
