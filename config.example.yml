@@ -1,4 +1,40 @@
-# Telegram 用户号定时签到 / 按钮式 bot 流程配置示例
+# 账号级 env 示例（写在 .env，不要写进 config.yml）：
+# ALICE_API_ID=123456
+# ALICE_API_HASH=...
+# ALICE_SESSION_STRING=...
+# BOB_API_ID=123456
+# BOB_API_HASH=...
+# BOB_SESSION_STRING=...
+#
+# config.yml 中的多账号结构示例：
+# accounts:
+#   - name: alice
+#     enabled: true
+#     env_prefix: ALICE
+#     groups:
+#       - name: alice每日签到
+#         chat_id: some_bot
+#         tasks:
+#           - name: morning
+#             cron: "0 10 9 * * *"
+#             message: /checkin
+#           - name: night
+#             cron: "0 10 21 * * *"
+#             message: "签到"
+#   - name: bob
+#     enabled: true
+#     env_prefix: BOB
+#     groups:
+#       - name: bob每日签到
+#         chat_id: another_bot
+#         message: /checkin
+#         cron: ""
+#
+# 说明：
+# - 实际 job 名会展开为 account/group/task，例如 alice/alice每日签到/morning。
+# - 同一账号同一 chat_id 的任务会串行执行，避免菜单 flow 上下文串线。
+# - 不同账号可以并行执行；某个账号 session 失效不会改变其他账号配置。
+# - 旧版单账号 groups: 结构仍兼容，继续读取 .env 中的 TG_API_ID/TG_API_HASH/TG_SESSION_STRING。
 #
 # 使用方法：
 #   cp config.example.yml config/config.yml
@@ -11,6 +47,7 @@
 # - bot/用户私聊可使用 username，例如 freexzteam_bot 或 @freexzteam_bot。
 # - 普通每日签到用 message。
 # - 需要按菜单一步步走的 bot 用 flow。
+# - 多账号时使用 accounts:，每个账号有独立 groups/tasks；凭据建议放 .env 并用 *_env 引用。
 
 timezone: Asia/Shanghai
 

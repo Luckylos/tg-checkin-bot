@@ -6,6 +6,7 @@ from typing import Any, Iterator, Literal
 DEFAULT_CRON = "0 10 0 * * *"  # daily 00:10:00
 DEFAULT_STAGGER_SECONDS = 1800
 STAGGER_MODES = {"stable", "random", "off"}
+DEFAULT_ACCOUNT_NAME = "default"
 
 FlowAction = Literal["send", "click", "wait"]
 UnknownPolicy = Literal["retry", "abort"]
@@ -91,16 +92,26 @@ class JobConfig:
     stagger_seconds: int
     stagger_mode: str
     flow: FlowSpec = field(default_factory=FlowSpec)
+    account_name: str = DEFAULT_ACCOUNT_NAME
 
 
 @dataclass(frozen=True)
 class AppSettings:
-    api_id: int
-    api_hash: str
-    session_string: str
+    api_id: int | None = None
+    api_hash: str | None = None
+    session_string: str | None = None
     config_path: str = "/config/config.yml"
     reload_seconds: int = 60
     control_enabled: bool = True
+
+
+@dataclass(frozen=True)
+class AccountSettings:
+    name: str
+    api_id: int
+    api_hash: str
+    session_string: str
+    enabled: bool = True
 
 
 def normalize_chat_id(value: Any) -> int | str:

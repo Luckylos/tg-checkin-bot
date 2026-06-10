@@ -19,6 +19,7 @@ Telegram 用户号定时签到 / 按钮式 bot 流程自动化工具。
 - [配置从哪里开始写](#配置从哪里开始写)
 - [示例 1：普通每日签到](#示例-1普通每日签到)
 - [示例 2：同一目标多个时间段](#示例-2同一目标多个时间段)
+- [示例 2.5：一个容器跑多个账号](#示例-25一个容器跑多个账号)
 - [示例 3：按钮式 flow，一次走完整菜单](#示例-3按钮式-flow一次走完整菜单)
 - [示例 4：重复兑换/抢购 flow](#示例-4重复兑换抢购-flow)
 - [flow 是怎么判断继续、成功、重试、终止的](#flow-是怎么判断继续成功重试终止的)
@@ -44,8 +45,8 @@ Telegram 用户号定时签到 / 按钮式 bot 流程自动化工具。
 
 - 验证码、支付确认、人机验证、安全检测等需要人工判断的流程。
 - 需要真正点击 **InlineKeyboard callback** 的复杂 bot。目前 `click` 对 ReplyKeyboard 类菜单等价为“发送按钮文本”。
-- 高频抢购、秒级并发、绕过限制。当前设计是单账号、低频、可控、可停止。
-- 同一 chat/bot 多个 flow 并发执行。当前没有 chat-level lock，建议不要给同一 bot 配置同时运行的多个 flow。
+- 高频抢购、秒级并发、绕过限制。当前设计是多账号可隔离、单账号内低频、可控、可停止。
+- 同一账号同一 chat/bot 多个 flow 并发执行。运行时会按账号+chat 加锁串行执行；仍建议不要把多个高风险 flow 设到同一时间。
 
 ## 核心概念
 
@@ -273,6 +274,71 @@ groups:
 - `HyVPS 多时间段/text-message`
 
 控制命令里如果要指定子任务，可使用完整名或当前群内的短任务名。
+
+## 示例 2.5：一个容器跑多个账号
+
+一个容器可以同时连接多个 Telethon 用户号。每个账号有自己的 session、groups 和 tasks；实际调度 job 名会自动展开为 `account/group/task`，避免不同账号同名任务冲突。
+
+`.env` 建议这样放账号凭据，不要把 session 写进 Git：
+
+```env
+ALICE_API_ID=123456
+ALICE_API_HASH=...
+ALICE_SESSION_STRING=...
+BOB_API_ID=123456
+BOB_API_HASH=...
+BOB_SESSION_STRING=...
+```
+
+`config/config.yml`：
+
+```yaml
+timezone: Asia/Shanghai
+default_cron: "0 10 0 * * *"
+default_stagger_seconds: 1800
+
+accounts:
+  - name: alice
+    enabled: true
+    env_prefix: ALICE
+    groups:
+      - name: 公益Plus
+        chat_id: freexzteam_bot
+        tasks:
+          - name: 签到
+            cron: ""
+            message: "📅 每日签到"
+          - name: plus兑换
+            cron: "0 0 0 * * *"
+            flow:
+              repeat:
+                count: 1
+              steps:
+                - action: send
+                  text: "/start"
+                  expect_any: ["积分商城"]
+
+  - name: bob
+    enabled: true
+    env_prefix: BOB
+    groups:
+      - name: HyVPS
+        chat_id: -1003849837200
+        tasks:
+          - name: morning
+            cron: "0 10 9 * * *"
+            message: /checkin@HyVPS_Bot
+          - name: night
+            cron: "0 10 21 * * *"
+            message: /sign@OtherBot
+```
+
+执行语义：
+
+- `alice/公益Plus/签到` 与 `bob/HyVPS/morning` 可以并行，因为它们属于不同账号。
+- 同一账号同一 `chat_id` 会自动串行执行，避免两个 flow 同时打到同一个 bot 导致上下文串线。
+- `accounts:` 不影响旧版单账号 `groups:` 配置；旧配置继续使用 `.env` 里的 `TG_API_ID` / `TG_API_HASH` / `TG_SESSION_STRING`。
+- 多账号控制命令监听各自账号发出的 outgoing 命令；命令只会读写当前账号的 `groups`。
 
 ## 示例 3：按钮式 flow，一次走完整菜单
 
@@ -537,6 +603,16 @@ flow:
 - `default_cron`：任务 `cron` 留空时使用，默认 `0 10 0 * * *`。
 - `default_stagger_seconds`：默认错峰窗口，默认 `1800` 秒。
 - `default_stagger_mode`：`stable` / `random` / `off`。
+- `accounts`：可选，多账号配置列表。存在时每个账号从自己的 `groups` 生成任务；旧版顶层 `groups` 仍兼容。
+
+### account 字段
+
+- `name`：账号名，会进入 job 名称，例如 `alice/HyVPS/morning`；不能包含 `/`。
+- `enabled`：是否启用该账号。
+- `env_prefix`：推荐用法，例如 `ALICE` 会读取 `ALICE_API_ID`、`ALICE_API_HASH`、`ALICE_SESSION_STRING`。
+- `api_id_env` / `api_hash_env` / `session_string_env`：显式指定 env 名，优先于 `env_prefix`。
+- `api_id` / `api_hash` / `session_string`：也支持直接写值，但不建议把密钥或 session 写进配置文件。
+- `groups`：该账号自己的目标会话和任务列表。
 
 ### group 字段
 
@@ -890,7 +966,8 @@ tests/                    # 行为回归测试
 - `TG_SESSION_STRING` 泄露后应立即在 Telegram 注销对应会话并重新生成。
 - 不建议在服务器上交互输入手机号、验证码或 2FA 密码。
 - 不要把所有任务设置成同一秒发送；保留错峰或分散 cron。
+- 多账号部署时，每个账号使用独立 env 变量或 session；一个账号泄露/失效时只轮换该账号。
 - 对会产生消耗/兑换/购买的 flow，先移除最后确认步骤做 dry-run，确认路径正确后再启用。
-- 不要给同一 bot 配置多个同时运行的 flow；当前版本尚未实现 chat-level lock。
+- 不建议把同一账号同一 bot 的多个 flow 设为同一时间；程序会按账号+chat 串行加锁，但过多排队仍可能导致菜单上下文过期。
 - 终止条件优先写进 `abort_on_text`，不要只依赖某一步的 `expect_any`。
 - 对抢购/兑换类任务设置合理的 `count`、`interval_seconds`、`max_runtime_seconds`，避免长时间刷屏。

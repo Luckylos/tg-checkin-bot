@@ -5,7 +5,7 @@ import logging
 import sys
 
 from .app import CheckinApp
-from .config import load_config, load_settings_from_env, parse_jobs
+from .config import load_config, load_settings_from_env, parse_accounts, parse_jobs
 from .scheduler import cron_trigger
 from .telegram import command_entities
 
@@ -28,6 +28,8 @@ async def validate() -> None:
     if len(sys.argv) >= 3:
         config_path = sys.argv[2]
     config = load_config(config_path)
+    settings = load_settings_from_env()
+    accounts = parse_accounts(config, settings, require_secrets=False)
     timezone = str(config.get("timezone") or "Asia/Shanghai")
     jobs = parse_jobs(config)
     for job in jobs:
@@ -37,7 +39,8 @@ async def validate() -> None:
                 command_entities(step.send, job.parse_bot_command)
         else:
             command_entities(job.message, job.parse_bot_command)
-    print(f"OK: {len(jobs)} jobs, timezone={timezone}")
+    account_suffix = f", accounts={len(accounts)}" if accounts else ""
+    print(f"OK: {len(jobs)} jobs, timezone={timezone}{account_suffix}")
 
 
 def main() -> None:
