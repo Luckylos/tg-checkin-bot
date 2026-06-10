@@ -160,6 +160,46 @@ accounts:
 
 不同账号可并行；同一账号同一 `chat_id` 串行。
 
+### 从多个容器整合到一个容器
+
+推荐把多个同构签到实例合并成一个 Compose 服务，用多个 account 承载不同 Telegram 用户号：
+
+```env
+ACC1_API_ID=123456
+ACC1_API_HASH=...
+ACC1_SESSION_STRING=...
+ACC2_API_ID=123456
+ACC2_API_HASH=...
+ACC2_SESSION_STRING=...
+ACC3_API_ID=123456
+ACC3_API_HASH=...
+ACC3_SESSION_STRING=...
+```
+
+```yaml
+accounts:
+  - name: main
+    env_prefix: ACC1
+    groups: []
+  - name: account2
+    env_prefix: ACC2
+    groups: []
+  - name: account3
+    env_prefix: ACC3
+    groups: []
+```
+
+迁移原则：
+
+- 先备份每个旧实例的 `.env`、`config/config.yml`、`docker-compose.yml`。
+- 把旧实例的 `groups` 原样移动到对应 `accounts[].groups`。
+- 只改 env 变量名前缀，不改 session 字符串内容。
+- 合并后先运行 `python /app/app.py validate /config/config.yml`，确认 job 数量符合预期。
+- 新单容器启动并确认 3 个账号都 `authorized account=...` 后，再停用旧实例。
+- 停用旧实例建议先 `systemctl disable --now ...` 并保留目录，不要立即删除，便于回滚。
+
+资源配置按账号数和任务量调整。示例：3 个低频账号可从 3 个 `0.50 CPU / 256m` 实例合并为 1 个 `1.00 CPU / 768m` 容器；实际以日志、内存和 FloodWait 情况为准。
+
 ## flow 菜单状态机
 
 普通签到用 `message`；需要菜单上下文的流程用 `flow`，不要拆成多个独立定时消息。
