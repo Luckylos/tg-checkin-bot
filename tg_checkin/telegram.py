@@ -6,6 +6,7 @@ import sqlite3
 import struct
 from typing import Optional
 
+import socks
 from telethon import TelegramClient
 from telethon.crypto import AuthKey
 from telethon.sessions import MemorySession, StringSession
@@ -43,11 +44,30 @@ def dc_server_address(dc_id: int, test_mode: bool = False) -> str:
     return table[dc_id]
 
 
-def create_client(session_string: str, api_id: int, api_hash: str) -> TelegramClient:
+def create_client(
+    session_string: str,
+    api_id: int,
+    api_hash: str,
+    *,
+    proxy_type: str | None = None,
+    proxy_host: str | None = None,
+    proxy_port: int | None = None,
+) -> TelegramClient:
     """Create a Telethon client from Telethon or Pyrogram-style strings."""
     session_string = session_string.strip()
+    proxy = None
+    if proxy_type and proxy_host and proxy_port:
+        proxy_map = {
+            "socks5": socks.SOCKS5,
+            "socks4": socks.SOCKS4,
+            "http": socks.HTTP,
+        }
+        proxy_kind = proxy_map.get(proxy_type)
+        if proxy_kind is None:
+            raise ValueError(f"unsupported TELEGRAM_PROXY_TYPE: {proxy_type}")
+        proxy = (proxy_kind, proxy_host, proxy_port)
     if session_string.startswith("1"):
-        return TelegramClient(StringSession(session_string), api_id, api_hash)
+        return TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
 
     if LEGACY_SESSION_RE.fullmatch(session_string):
         raw = base64.urlsafe_b64decode(session_string + "=" * (-len(session_string) % 4))
@@ -58,7 +78,7 @@ def create_client(session_string: str, api_id: int, api_hash: str) -> TelegramCl
             session = MemorySession()
             session.set_dc(dc_id, dc_server_address(dc_id, test_mode), 443)
             session.auth_key = AuthKey(auth_key)
-            return TelegramClient(session, api_id, api_hash)
+            return TelegramClient(session, api_id, api_hash, proxy=proxy)
         if raw.startswith(b"SQLite format 3\x00") and hasattr(sqlite3.Connection, "deserialize"):
             source = sqlite3.connect(":memory:")
             source.deserialize(raw)
@@ -66,9 +86,9 @@ def create_client(session_string: str, api_id: int, api_hash: str) -> TelegramCl
             shared = sqlite3.connect(db_uri, uri=True)
             source.backup(shared)
             shared.close()
-            return TelegramClient(db_uri, api_id, api_hash)
+            return TelegramClient(db_uri, api_id, api_hash, proxy=proxy)
 
-    return TelegramClient(StringSession(session_string), api_id, api_hash)
+    return TelegramClient(StringSession(session_string), api_id, api_hash, proxy=proxy)
 
 
 async def resolve_send_entity(client: TelegramClient, chat_id: int | str):

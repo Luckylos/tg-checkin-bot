@@ -5,6 +5,16 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      HTTP_PROXY: "http://host.docker.internal:7890"
+      HTTPS_PROXY: "http://host.docker.internal:7890"
+      NO_PROXY: "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      no_proxy: "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      TELEGRAM_PROXY_TYPE: "http"
+      TELEGRAM_PROXY_HOST: "host.docker.internal"
+      TELEGRAM_PROXY_PORT: "7890"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/config:rw
     security_opt:
@@ -14,8 +24,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-    mem_limit: 256m
-    cpus: "0.50"
+    mem_limit: 768m
+    cpus: "1.00"
     logging:
       driver: json-file
       options:

@@ -49,6 +49,23 @@ docker compose up -d
 docker compose logs --tail=80 tg-checkin
 ```
 
+## 代理与出站
+
+默认建议 Docker 容器通过 ShellCrash 出站：
+
+- HTTP/HTTPS 请求走 `HTTP_PROXY/HTTPS_PROXY=http://host.docker.internal:7890`
+- Compose 保留 `extra_hosts: ["host.docker.internal:host-gateway"]`
+- Telegram/Telethon 属于 MTProto 原生 TCP，**不能只依赖 `HTTP_PROXY`**，必须额外设置：
+
+```env
+TELEGRAM_PROXY_TYPE=http
+TELEGRAM_PROXY_HOST=host.docker.internal
+TELEGRAM_PROXY_PORT=7890
+```
+
+项目会把以上 `TELEGRAM_PROXY_*` 显式传给 `TelegramClient(..., proxy=...)`。
+如果宿主机没有 ShellCrash，请按实际代理地址调整，或留空禁用显式 Telegram 代理。
+
 ## 生成 SESSION_STRING
 
 建议在本地可信机器生成，不要在服务器或公开聊天里输入手机号、验证码、2FA 密码。

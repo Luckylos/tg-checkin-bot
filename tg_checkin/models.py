@@ -97,6 +97,9 @@ class AppSettings:
     config_path: str = "/config/config.yml"
     reload_seconds: int = 60
     control_enabled: bool = True
+    telegram_proxy_type: str | None = None
+    telegram_proxy_host: str | None = None
+    telegram_proxy_port: int | None = None
 
 
 @dataclass(frozen=True)

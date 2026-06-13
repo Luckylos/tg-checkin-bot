@@ -21,7 +21,14 @@ class AccountRuntime:
     def __init__(self, app: CheckinApp, account: AccountSettings) -> None:
         self.app = app
         self.account = account
-        self.client = create_client(account.session_string, account.api_id, account.api_hash)
+        self.client = create_client(
+            account.session_string,
+            account.api_id,
+            account.api_hash,
+            proxy_type=app.settings.telegram_proxy_type,
+            proxy_host=app.settings.telegram_proxy_host,
+            proxy_port=app.settings.telegram_proxy_port,
+        )
         self.logger = logging.getLogger("tg-checkin")
         self.flow_runner = BotFlowRunner(self.client, logger=self.logger)
         self._chat_locks: dict[str, asyncio.Lock] = {}
