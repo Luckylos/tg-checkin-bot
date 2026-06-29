@@ -173,6 +173,9 @@ class CheckinApp:
             if not job.enabled:
                 self.logger.info("skip disabled account=%s job=%s", job.account_name, job.name)
                 continue
+            if job.flow and job.flow.is_noop:
+                self.logger.info("skip noop flow account=%s job=%s (repeat.count=0)", job.account_name, job.name)
+                continue
             self.scheduler.add_job(
                 self.send_job,
                 trigger=cron_trigger(job.cron, timezone),

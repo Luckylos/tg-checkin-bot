@@ -60,6 +60,11 @@ class FlowSpec:
     def __bool__(self) -> bool:
         return bool(self.steps)
 
+    @property
+    def is_noop(self) -> bool:
+        """True when the flow should not execute (repeat.count <= 0)."""
+        return self.repeat.count <= 0
+
     def __iter__(self) -> Iterator[FlowStep]:
         return iter(self.steps)
 

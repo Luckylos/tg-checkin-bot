@@ -96,3 +96,16 @@ def test_flow_task_does_not_remove_regular_signin_task():
     assert jobs[0].flow == ()
     assert jobs[1].message == ""
     assert jobs[1].flow[0].send == "/start"
+
+
+def test_parse_flow_accepts_count_zero_as_noop():
+    """repeat.count=0 is valid and means "this flow should not execute"."""
+    flow = parse_flow({"steps": [{"action": "send", "text": "/start", "expect_any": ["ok"]}], "repeat": {"count": 0}})
+    assert flow.repeat.count == 0
+    assert flow.is_noop is True
+    assert flow  # has steps, truthy; is_noop controls execution
+
+
+def test_parse_flow_rejects_count_negative():
+    with pytest.raises(ValueError, match="repeat.count must be >= 0"):
+        parse_flow({"steps": [{"action": "send", "text": "/start"}], "repeat": {"count": -1}})

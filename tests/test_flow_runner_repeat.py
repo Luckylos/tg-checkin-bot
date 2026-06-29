@@ -173,8 +173,8 @@ def test_reply_classifier_prioritizes_abort_over_success_and_retry():
 
 
 def test_structured_flow_config_validation_rejects_bad_repeat_and_step_shape():
-    with pytest.raises(ValueError, match="repeat.count must be > 0"):
-        parse_jobs(cfg([{"name": "bad", "chat_id": "freexzteam_bot", "flow": {"repeat": {"count": 0}, "steps": [{"action": "send", "text": "/start"}]}}]))
+    with pytest.raises(ValueError, match="repeat.count must be >= 0"):
+        parse_jobs(cfg([{"name": "bad", "chat_id": "freexzteam_bot", "flow": {"repeat": {"count": -1}, "steps": [{"action": "send", "text": "/start"}]}}]))
 
     with pytest.raises(ValueError, match="click step requires button"):
         parse_jobs(cfg([{"name": "bad", "chat_id": "freexzteam_bot", "flow": {"repeat": {"count": 1}, "steps": [{"action": "click"}]}}]))
@@ -195,3 +195,64 @@ def test_structured_flow_config_validation_rejects_bad_repeat_and_step_shape():
                 ]
             )
         )
+
+
+async def test_flow_with_count_zero_parses_as_noop_and_runner_returns_early():
+    job = parse_jobs(
+        cfg(
+            [
+                {
+                    "name": "PlusBot",
+                    "chat_id": "freexzteam_bot",
+                    "tasks": [
+                        {
+                            "name": "兑换",
+                            "flow": {
+                                "repeat": {"count": 0},
+                                "steps": [{"action": "send", "text": "/start", "expect_any": ["积分商城"]}],
+                            },
+                        }
+                    ],
+                }
+            ]
+        )
+    )[0]
+    assert job.flow.repeat.count == 0
+    assert job.flow.is_noop is True
+    assert job.flow  # has steps, so truthy; is_noop controls execution
+
+    # Runner returns early without sending anything
+    client = FakeTelegramClient([])
+    result = await BotFlowRunner(client).run(job, object())
+    assert result.status == "DONE_COUNT_REACHED"
+    assert result.round == 0
+    assert result.reason == "count_is_zero"
+    assert len(client.sent) == 0
+
+
+async def test_flow_with_count_zero_skipped_by_scheduler_layer():
+    """count=0 flows are parsed but the scheduler layer (app.reload_config) skips them."""
+    jobs = parse_jobs(
+        cfg(
+            [
+                {
+                    "name": "PlusBot",
+                    "chat_id": "freexzteam_bot",
+                    "tasks": [
+                        {"name": "签到", "message": "签到"},
+                        {
+                            "name": "兑换",
+                            "flow": {
+                                "repeat": {"count": 0},
+                                "steps": [{"action": "send", "text": "/start", "expect_any": ["ok"]}],
+                            },
+                        },
+                    ],
+                }
+            ]
+        )
+    )
+    assert len(jobs) == 2
+    assert jobs[0].message == "签到"
+    assert jobs[1].flow.is_noop is True
+    assert jobs[1].flow.repeat.count == 0

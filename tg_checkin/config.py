@@ -252,9 +252,12 @@ def _build_job(
     if stagger_mode == "off":
         stagger_seconds = 0
 
+    has_flow_key = "flow" in source
     flow = parse_flow(source.get("flow"), label=name + ".flow")
     message = str(source.get("message", ""))
-    task_type = str(source.get("type") or ("flow" if flow else "message")).strip().lower()
+    # Infer type: if source has a flow key, it's a flow task (even if noop);
+    # otherwise check parsed flow truthiness for backward compat.
+    task_type = str(source.get("type") or ("flow" if (has_flow_key or flow) else "message")).strip().lower()
     if task_type not in {"message", "flow"}:
         raise ValueError(f"{name}: type must be message or flow")
     if task_type == "message" and not message:

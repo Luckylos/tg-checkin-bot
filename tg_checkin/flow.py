@@ -95,6 +95,9 @@ class BotFlowRunner:
     async def run(self, job: JobConfig, entity) -> FlowResult:
         if not job.flow:
             raise FlowExecutionError(f"{job.name}: empty flow")
+        if job.flow.repeat.count <= 0:
+            self.logger.info("skipping noop flow job=%s (repeat.count=0)", job.name)
+            return FlowResult(job.name, (), status="DONE_COUNT_REACHED", round=0, reason="count_is_zero")
         self.logger.info(
             "starting flow job=%s chat_id=%s steps=%s count=%s",
             job.name,

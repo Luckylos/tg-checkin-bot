@@ -32,8 +32,8 @@ def _parse_repeat(raw: Any, *, label: str) -> RepeatPolicy:
     if not isinstance(raw, dict):
         raise ValueError(f"{label} must be a mapping")
     count = int(raw.get("count", 1))
-    if count <= 0:
-        raise ValueError(f"{label}.count must be > 0")
+    if count < 0:
+        raise ValueError(f"{label}.count must be >= 0")
     interval_seconds = float(raw.get("interval_seconds", raw.get("interval", 0)))
     jitter_seconds = float(raw.get("jitter_seconds", raw.get("jitter", 0)))
     if interval_seconds < 0:
