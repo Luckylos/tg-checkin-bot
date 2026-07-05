@@ -49,6 +49,33 @@ docker compose up -d
 docker compose logs --tail=80 tg-checkin
 ```
 
+### 开发与验证工作流（重要）
+
+当前项目的**主验证面是 built image，不是宿主源码目录本身**。
+
+原因：
+- 运行中的 `tg-checkin` 容器使用的是已构建镜像
+- `docker compose run --rm --no-deps tg-checkin ...` 也是在已构建镜像里执行
+- 如果你改了 `/opt/tg-checkin-bot` 下的源码但**没有先 `docker compose build`**，那么后续 `run` / `restart` / `exec` 很可能仍在验证旧镜像，而不是新代码
+
+推荐闭环：
+
+```bash
+cd /opt/tg-checkin-bot
+
+git status --short
+docker compose build tg-checkin
+docker compose run --rm --no-deps tg-checkin sh -lc \
+  'python -m pip install -q pytest >/tmp/pytest-install.log && pytest -q'
+docker compose run --rm --no-deps tg-checkin \
+  python /app/app.py validate /config/config.yml
+systemctl restart compose-tg-checkin-bot.service
+sleep 5
+docker logs --tail 60 tg-checkin
+```
+
+更完整的说明见：`docs/development-verification.md`
+
 ## 代理与出站
 
 默认建议 Docker 容器通过 ShellCrash 出站：
