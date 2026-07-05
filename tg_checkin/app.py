@@ -21,17 +21,9 @@ class AccountRuntime:
     def __init__(self, app: CheckinApp, account: AccountSettings) -> None:
         self.app = app
         self.account = account
-        self.client = create_client(
-            account.session_string,
-            account.api_id,
-            account.api_hash,
-            proxy_type=app.settings.telegram_proxy_type,
-            proxy_host=app.settings.telegram_proxy_host,
-            proxy_port=app.settings.telegram_proxy_port,
-        )
         self.logger = logging.getLogger("tg-checkin")
-        self.flow_runner = BotFlowRunner(self.client, logger=self.logger)
         self._chat_locks: dict[str, asyncio.Lock] = {}
+        self._bind_client(self._create_client())
         self.control = ControlService(
             account_name=account.name,
             load_config=self.load_account_config,
@@ -40,7 +32,27 @@ class AccountRuntime:
             send_job=self.send_control_job,
         )
 
-    async def start_client(self) -> None:
+    def _create_client(self):
+        return create_client(
+            self.account.session_string,
+            self.account.api_id,
+            self.account.api_hash,
+            proxy_type=self.app.settings.telegram_proxy_type,
+            proxy_host=self.app.settings.telegram_proxy_host,
+            proxy_port=self.app.settings.telegram_proxy_port,
+        )
+
+    def _bind_client(self, client) -> None:
+        self.client = client
+        self.flow_runner = BotFlowRunner(self.client, logger=self.logger)
+
+    def _client_connected(self) -> bool:
+        is_connected = getattr(self.client, "is_connected", None)
+        if callable(is_connected):
+            return bool(is_connected())
+        return False
+
+    async def _authorize_bound_client(self) -> None:
         await self.client.connect()
         if not await self.client.is_user_authorized():
             raise RuntimeError(f"{self.account.name}: Telegram session string is not authorized")
@@ -54,19 +66,58 @@ class AccountRuntime:
             self.client.add_event_handler(self.handle_control_message, events.NewMessage(outgoing=True))
             self.logger.info("control bot enabled for account=%s self outgoing commands", self.account.name)
 
+    async def start_client(self) -> None:
+        await self._authorize_bound_client()
+
     async def disconnect(self) -> None:
         await self.client.disconnect()
+
+    async def ensure_client_ready(self, *, reason: str) -> None:
+        if self._client_connected() and await self.client.is_user_authorized():
+            return
+        await self.rebuild_client(reason=reason)
+
+    async def rebuild_client(self, *, reason: str) -> None:
+        self.logger.warning("rebuilding client account=%s reason=%s", self.account.name, reason)
+        try:
+            await self.client.disconnect()
+        except Exception:
+            self.logger.exception("client disconnect during rebuild failed account=%s", self.account.name)
+        self._bind_client(self._create_client())
+        await self._authorize_bound_client()
+
+    async def _dispatch_job_once(self, job: JobConfig) -> None:
+        entity = await resolve_send_entity(self.client, job.chat_id)
+        if job.flow:
+            await self.flow_runner.run(job, entity)
+        else:
+            await self.send_single_message_job(job, entity)
 
     async def send_job(self, job: JobConfig, *, apply_stagger: bool = False) -> None:
         if apply_stagger:
             await maybe_stagger_job(job)
         lock = self._chat_locks.setdefault(str(job.chat_id), asyncio.Lock())
         async with lock:
-            entity = await resolve_send_entity(self.client, job.chat_id)
-            if job.flow:
-                await self.flow_runner.run(job, entity)
-            else:
-                await self.send_single_message_job(job, entity)
+            await self.ensure_client_ready(reason=f"preflight:{job.name}")
+            try:
+                await self._dispatch_job_once(job)
+            except ConnectionError as exc:
+                if job.flow:
+                    self.logger.warning(
+                        "flow connection lost account=%s job=%s; skip auto-retry to avoid duplicate interaction: %s",
+                        self.account.name,
+                        job.name,
+                        exc,
+                    )
+                    raise
+                self.logger.warning(
+                    "connection lost account=%s job=%s; rebuilding client and retrying once: %s",
+                    self.account.name,
+                    job.name,
+                    exc,
+                )
+                await self.rebuild_client(reason=f"retry:{job.name}:{type(exc).__name__}")
+                await self._dispatch_job_once(job)
             if job.delay_seconds > 0:
                 await asyncio.sleep(job.delay_seconds)
 
