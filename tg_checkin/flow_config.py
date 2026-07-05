@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from .models import FlowSpec, FlowStep, MatchRules, RepeatPolicy
+from .models import FlowAction, FlowSpec, FlowStep, MatchRules, RepeatPolicy, UnknownPolicy
 
 
 def parse_flow(raw: Any, *, label: str = "flow") -> FlowSpec:
@@ -71,7 +71,7 @@ def _parse_rules(raw: Any, *, label: str) -> MatchRules:
         abort_on_text=_parse_text_list(raw.get("abort_on_text"), label=f"{label}.abort_on_text"),
         success_on_text=_parse_text_list(raw.get("success_on_text"), label=f"{label}.success_on_text"),
         retry_on_text=_parse_text_list(raw.get("retry_on_text"), label=f"{label}.retry_on_text"),
-        unknown_policy=unknown_policy,  # type: ignore[arg-type]
+        unknown_policy=cast(UnknownPolicy, unknown_policy),
         max_unknown_replies=max_unknown,
     )
 
@@ -97,7 +97,7 @@ def _parse_structured_step(item: Any, *, label: str) -> FlowStep:
     expectation_item = dict(item)
     expectation_item["_allow_expect_mapping"] = True
     return FlowStep(
-        action=action,  # type: ignore[arg-type]
+        action=cast(FlowAction, action),
         text=text,
         button=button,
         expect_any=_parse_expectations(expectation_item, label=label),

@@ -148,7 +148,8 @@ class ControlService:
         if target.is_task:
             group = groups[target.group_index]
             tasks = ensure_tasks_list(group)
-            removed = tasks.pop(target.task_index)  # type: ignore[arg-type]
+            assert target.task_index is not None
+            removed = tasks.pop(target.task_index)
             if not tasks:
                 groups.pop(target.group_index)
             await self._persist(config)
