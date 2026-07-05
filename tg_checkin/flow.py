@@ -4,8 +4,9 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
+from .flow_transport import FlowTransport, TelegramClientLike
 from .models import FlowStep, JobConfig, MatchRules
 from .telegram import command_entities
 
@@ -27,10 +28,10 @@ class TelegramMessage(Protocol):
     buttons: Any
 
 
-class TelegramClientLike(Protocol):
+class FlowTransportLike(Protocol):
     async def send_message(self, entity, message: str, *, formatting_entities=None) -> Any: ...
-    async def get_messages(self, entity, *, limit: int) -> Any: ...
-    def iter_messages(self, entity, *, limit: int) -> Any: ...
+    async def latest_message_id(self, entity) -> int: ...
+    async def wait_for_reply(self, entity, *, after_id: int, timeout: float): ...
 
 
 @dataclass(frozen=True)
@@ -88,9 +89,12 @@ def _find_first_match(text: str, candidates: tuple[str, ...]) -> str | None:
 
 
 class BotFlowRunner:
-    def __init__(self, client: TelegramClientLike, *, logger: logging.Logger | None = None) -> None:
-        self.client = client
+    def __init__(self, client_or_transport: TelegramClientLike | FlowTransportLike, *, logger: logging.Logger | None = None) -> None:
         self.logger = logger or logging.getLogger("tg-checkin.flow")
+        if hasattr(client_or_transport, "latest_message_id") and hasattr(client_or_transport, "wait_for_reply"):
+            self.transport: FlowTransportLike = cast(FlowTransportLike, client_or_transport)
+        else:
+            self.transport = FlowTransport(cast(TelegramClientLike, client_or_transport))
 
     async def run(self, job: JobConfig, entity) -> FlowResult:
         if not job.flow:
@@ -151,7 +155,7 @@ class BotFlowRunner:
         return FlowResult(job.name, tuple(results), status="DONE_COUNT_REACHED", round=job.flow.repeat.count, reason="count_reached")
 
     async def _run_round(self, job: JobConfig, entity, round_no: int) -> FlowResult:
-        last_id = await self._latest_message_id(entity)
+        last_id = await self.transport.latest_message_id(entity)
         results: list[FlowStepResult] = []
         previous_reply: TelegramMessage | None = None
         for index, step in enumerate(job.flow, start=1):
@@ -207,8 +211,8 @@ class BotFlowRunner:
             step.expect_any,
         )
         if send_text:
-            await self.client.send_message(entity, send_text, formatting_entities=entities)
-        reply = await self._wait_for_reply(entity, after_id=after_id, timeout=step.timeout_seconds)
+            await self.transport.send_message(entity, send_text, formatting_entities=entities)
+        reply = await self.transport.wait_for_reply(entity, after_id=after_id, timeout=step.timeout_seconds)
         if reply is None:
             raise FlowExecutionError(f"{job.name}: flow round {round_no} step {index} timed out waiting for reply after {send_text!r}")
         text = render_reply_text(reply)
@@ -220,21 +224,6 @@ class BotFlowRunner:
             return step.send
         button_text = find_button_text(previous_reply, step.button)
         return button_text or step.button
-
-    async def _latest_message_id(self, entity) -> int:
-        messages = await self.client.get_messages(entity, limit=1)
-        if not messages:
-            return 0
-        return int(messages[0].id)
-
-    async def _wait_for_reply(self, entity, *, after_id: int, timeout: float):
-        deadline = asyncio.get_running_loop().time() + timeout
-        while asyncio.get_running_loop().time() < deadline:
-            async for message in self.client.iter_messages(entity, limit=10):
-                if message.id > after_id and not message.out:
-                    return message
-            await asyncio.sleep(1)
-        return None
 
     def _runtime_exceeded(self, job: JobConfig, started_at: float) -> bool:
         limit = job.flow.repeat.max_runtime_seconds

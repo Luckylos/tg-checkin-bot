@@ -485,10 +485,10 @@ docker logs --tail 60 tg-checkin
   - 已将运维 `.env` 备份移出 repo worktree：`/root/ops-backups/tg-checkin-bot/.env.bak.20260705-170250`
   - 已恢复与本轮无关的 `docker-compose.yml` 差异，避免混入后续重构提交
   - 已准备把“自愈增量 + 测试回归 + 重构计划文档”固化为 Slice 0 基线提交
-- 当前建议下一步：**进入 Slice 4，重构 `flow.py` / Telegram transport 边界**
-- 已完成：**Slice 3 control 平面拆分已落地并通过 built image 验证**
-  - 已拆出 `control_parse.py` / `control_targets.py` / `control_service.py`
-  - `control.py` 已收缩为稳定 facade，保留 `ControlContext` / `ControlService` / `parse_control_command` 等导出面
+- 当前建议下一步：**进入 Slice 5，统一验证流程与文档**
+- 已完成：**Slice 4 flow / transport 边界重构已落地并通过 built image 验证**
+  - 已拆出 `flow_transport.py`，承接消息发送、latest_message_id、wait_for_reply 等 Telegram I/O
+  - `BotFlowRunner(client)` 的调用习惯保持不变，对外兼容
 - 注意：后续每个 slice 都必须继续维持“built image 为主验证面”的约束
 
 ---
