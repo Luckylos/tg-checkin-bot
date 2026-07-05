@@ -485,7 +485,10 @@ docker logs --tail 60 tg-checkin
   - 已将运维 `.env` 备份移出 repo worktree：`/root/ops-backups/tg-checkin-bot/.env.bak.20260705-170250`
   - 已恢复与本轮无关的 `docker-compose.yml` 差异，避免混入后续重构提交
   - 已准备把“自愈增量 + 测试回归 + 重构计划文档”固化为 Slice 0 基线提交
-- 当前建议下一步：**从 Slice 1 开始，先把 `app.py` 的 runtime 控制面变薄**
+- 当前建议下一步：**进入 Slice 2，拆分 `config.py` 的配置域**
+- 已完成：**Slice 1 runtime 拆分已落地并通过 built image 验证**
+  - `AccountRuntime` 已迁出到 `tg_checkin/runtime.py`
+  - `app.py` 已收缩为应用编排层，并继续通过 `from .runtime import AccountRuntime` 暴露稳定导入面
 - 注意：后续每个 slice 都必须继续维持“built image 为主验证面”的约束
 
 ---

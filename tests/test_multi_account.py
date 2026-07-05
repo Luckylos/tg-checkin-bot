@@ -86,8 +86,8 @@ async def test_account_runtime_rebuilds_client_and_retries_single_message_on_con
     async def fake_resolve_send_entity(client, chat_id):
         return "entity"
 
-    monkeypatch.setattr("tg_checkin.app.create_client", lambda *args, **kwargs: created.pop(0))
-    monkeypatch.setattr("tg_checkin.app.resolve_send_entity", fake_resolve_send_entity)
+    monkeypatch.setattr("tg_checkin.runtime.create_client", lambda *args, **kwargs: created.pop(0))
+    monkeypatch.setattr("tg_checkin.runtime.resolve_send_entity", fake_resolve_send_entity)
 
     app = CheckinApp(AppSettings(control_enabled=False))
     runtime = __import__("tg_checkin.app", fromlist=["AccountRuntime"]).AccountRuntime(
@@ -121,12 +121,12 @@ async def test_account_runtime_rebuilds_client_and_retries_single_message_on_con
 
 async def test_account_runtime_does_not_blind_retry_flow_on_connection_error(monkeypatch):
     client = DummyClient()
-    monkeypatch.setattr("tg_checkin.app.create_client", lambda *args, **kwargs: client)
+    monkeypatch.setattr("tg_checkin.runtime.create_client", lambda *args, **kwargs: client)
 
     async def fake_resolve_send_entity(current_client, chat_id):
         return "entity"
 
-    monkeypatch.setattr("tg_checkin.app.resolve_send_entity", fake_resolve_send_entity)
+    monkeypatch.setattr("tg_checkin.runtime.resolve_send_entity", fake_resolve_send_entity)
 
     app = CheckinApp(AppSettings(control_enabled=False))
     runtime = __import__("tg_checkin.app", fromlist=["AccountRuntime"]).AccountRuntime(
